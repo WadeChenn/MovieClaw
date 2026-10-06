@@ -385,17 +385,18 @@ fun DiscoverScreen(
 
     val scroll = rememberScrollState()
     io.movieclaw.android.core.designsystem.TrackTabBarMinimize(scroll)
-    // 英雄轮播的数据来自 presentation == "hero" 那一行（六屏）
-    val heroRow = remember(state.rows) { state.rows.firstOrNull { it.section.presentation == "hero" } }
-    val heroSlides = remember(heroRow, origin, subscriptionIndex) {
-        heroRow?.titles.orEmpty().map { title ->
+    // 豆瓣没有专门的 hero 分区：从它自己的首个有图榜单选精选，正文榜单仍保留。
+    val heroTitles = remember(state.rows) { discoveryHeroTitles(state.rows) }
+    val heroSlides = remember(heroTitles, origin, subscriptionIndex) {
+        heroTitles.map { title ->
             title.toHeroSlide(
                 origin,
                 subscriptions.findIn(subscriptionIndex, title.provider, title.externalId, title.mediaType),
             )
         }
     }
-    var heroPage by remember { mutableIntStateOf(0) }
+    var heroPage by remember(state.source, state.mediaType) { mutableIntStateOf(0) }
+    LaunchedEffect(state.source, state.mediaType) { scroll.scrollTo(0) }
     // 氛围底色 = 当前这一屏剧照的主色（同一套取色算法）
     val ambient = rememberAmbientColor(heroSlides.getOrNull(heroPage)?.backdropUrl, origin)
     // 悬浮顶栏实际占的高度（状态栏 + 52dp）：筛选态下胶囊行与维度菜单都按它让位
@@ -724,9 +725,9 @@ fun DiscoverScreen(
  * 判断，等于把"已入库"当成"已订阅"——库里已有的片哪怕从没订阅过也显示「已订阅 ·
  * 追踪中」（用户报的正是这个）。入库看 library_status，订阅只能看订阅本身。
  */
-private fun DiscoveredTitle.toHeroSlide(origin: String?, sub: SubscriptionView?) = HeroSlide(
+internal fun DiscoveredTitle.toHeroSlide(origin: String?, sub: SubscriptionView?) = HeroSlide(
     id = titleRef,
-    backdropUrl = backdropUrl ?: posterUrl,
+    backdropUrl = backdropUrl?.takeIf { it.isNotBlank() } ?: posterUrl?.takeIf { it.isNotBlank() },
     origin = origin,
     label = "今日精选 · " + if (mediaType == "tv") "剧集" else "电影",
     title = title,
