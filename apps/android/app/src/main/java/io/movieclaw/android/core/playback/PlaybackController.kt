@@ -56,6 +56,7 @@ class PlaybackController(
     private val qoe: PlaybackQoe? = null,
     private val trickplay: TrickplayProvider? = null,
     private val engineFactory: ((EngineKind) -> PlayerEngine)? = null,
+    private val onStopCommitted: () -> Unit = {},
 ) {
     private var disposed = false
     private var recoveryJob: Job? = null
@@ -667,7 +668,9 @@ class PlaybackController(
         val duration = fileDurationMs()
         mainScope.launch {
             reportMutex.withLock {
-                runCatching { endpoint.reportProgress(progressRequest("stop", positionMs = duration)) }
+                if (runCatching { endpoint.reportProgress(progressRequest("stop", positionMs = duration)) }.getOrNull() != null) {
+                    onStopCommitted()
+                }
             }
         }
     }
@@ -927,7 +930,9 @@ class PlaybackController(
         cleanupScope.launch(Dispatchers.IO) { IsoBridge.closeOwner(this@PlaybackController) }
         cleanupScope.launch {
             withTimeoutOrNull(5_000) {
-                if (stopRequest != null) reportMutex.withLock { runCatching { endpoint.reportProgress(stopRequest) } }
+                if (stopRequest != null) reportMutex.withLock {
+                    if (runCatching { endpoint.reportProgress(stopRequest) }.getOrNull() != null) onStopCommitted()
+                }
             }
             snapshot?.sessionId?.let { id ->
                 withTimeoutOrNull(5_000) { runCatching { endpoint.stop(id) } }
