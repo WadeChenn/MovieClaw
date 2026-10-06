@@ -1,3 +1,5 @@
+@file:androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+
 package io.movieclaw.android.feature.reels
 
 import android.content.Context
@@ -6,6 +8,7 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.media3.common.Player
+import io.movieclaw.android.core.api.McApi
 import io.movieclaw.android.core.network.ApiFactory
 import io.movieclaw.android.core.network.dataOrThrow
 import io.movieclaw.android.core.playback.PlaybackNetwork
@@ -18,6 +21,9 @@ import io.movieclaw.android.core.playback.ExoEngine
 import io.movieclaw.android.core.playback.ReelsQuality
 import io.movieclaw.android.core.playback.SourceByteCache
 import io.movieclaw.android.core.playback.SubtitleCues
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -47,6 +53,8 @@ data class ReelSource(
     val audioRef: String?,
     /** 转码会话 id；直出为 null。离开这条时要停掉，播放中每 15 秒续命 */
     val sessionId: String? = null,
+    /** 关闭/心跳沿用建会话时的账号快照，切账号后不能重新取当前客户端。 */
+    val sessionApi: McApi? = null,
 )
 
 /**
@@ -121,6 +129,8 @@ class ReelsPlayers(
 
     /** 换条序号：连滑两条时把先落地那次作废（见 settle 注释） */
     private var settleSeq = 0
+    private var settleJob: Job? = null
+    private val pendingTeardowns = DeferredReelReleases<ExoEngine>(scope) { it.release() }
 
     private var current: Clip? = null
     private var standby: Clip? = null
@@ -167,6 +177,7 @@ class ReelsPlayers(
     fun settle(item: ReelItemView, index: Int, items: List<ReelItemView>) {
         if (current?.item?.id == item.id) return
         settleSeq += 1
+        settleJob?.cancel()
         val seq = settleSeq
         leaveCurrent(deferTeardown = true)
         val impressionAt = android.os.SystemClock.elapsedRealtime()
@@ -190,14 +201,14 @@ class ReelsPlayers(
             }
         } else {
             dropStandby()
-            scope.launch {
+            settleJob = scope.launch {
                 val source = openSource(item) ?: run {
                     failMessage = "这一条缺少取流地址"
                     onEvent(item, "fail", null, null, null, "no_stream_url")
                     return@launch
                 }
                 if (seq != settleSeq) {
-                    android.util.Log.i("McReels", "作废一次换条（已滑走）：${item.title.name}")
+                    closeSession(source.sessionId, source.sessionApi)
                     return@launch
                 }
                 io.movieclaw.android.core.playback.PlaybackStartupTrace.mark("决策+会话")
@@ -228,7 +239,7 @@ class ReelsPlayers(
                 // 「画面在放、状态却是暂停」——一进页面就顶着暂停键，全屏里点一下还弹不起来
                 // （只有「接上预起」那条分支置过，这条漏了）
                 playing = true
-                startPing(source.sessionId)
+                startPing(source.sessionId, source.sessionApi)
             }
         }
         schedulePrefetch(index)
@@ -271,7 +282,10 @@ class ReelsPlayers(
                 )
             ).dataOrThrow().let { it }
             val raw = if (view.timeline == "file") (view.masterUrl ?: view.streamUrl) else view.streamUrl
-            if (raw.isNullOrEmpty()) return@runCatching directSource(item, origin)
+            if (raw.isNullOrEmpty()) {
+                closeSession(view.sessionId, api)
+                return@runCatching directSource(item, origin)
+            }
             val url = if (raw.startsWith("http")) raw else origin.trimEnd('/') + raw
             // 服务端也可能直出（源本来就在上限之内）：没有 session_id 就是直出语义
             val direct = view.sessionId == null
@@ -300,11 +314,15 @@ class ReelsPlayers(
                 playerStartMs = engineStartMs,
                 playerEndMs = engineEndMs,
                 fileOffsetMs = if (direct || fileTimeline) 0L else item.segment.startMs,
-                cacheKey = if (direct) SourceByteCache.key(item.segment.fileId, item.play.sizeBytes) else null,
+                cacheKey = if (direct) SourceByteCache.key(item.segment.fileId, item.play.sizeBytes, origin) else null,
                 audioRef = item.play.audioOrdinal?.let { "embedded:$it" },
                 sessionId = view.sessionId,
+                sessionApi = api,
             )
-        }.getOrElse { directSource(item, origin) }
+        }.getOrElse { error ->
+            if (error is CancellationException) throw error
+            directSource(item, origin)
+        }
     }
 
     private fun directSource(item: ReelItemView, origin: String): ReelSource? {
@@ -316,7 +334,7 @@ class ReelsPlayers(
             playerStartMs = item.segment.startMs,
             playerEndMs = item.segment.endMs,
             fileOffsetMs = 0L,
-            cacheKey = SourceByteCache.key(item.segment.fileId, item.play.sizeBytes),
+            cacheKey = SourceByteCache.key(item.segment.fileId, item.play.sizeBytes, origin),
             audioRef = item.play.audioOrdinal?.let { "embedded:$it" },
         )
     }
@@ -326,7 +344,7 @@ class ReelsPlayers(
         val engine = clip.engine
         engine.player.addListener(object : Player.Listener {
             private fun firstFrame() {
-                if (clip.hasFirstFrame) return
+                if (current !== clip || clip.hasFirstFrame) return
                 clip.hasFirstFrame = true
                 clip.startedAtMs = android.os.SystemClock.elapsedRealtime()
                 frameReadyId = clip.item.id
@@ -352,11 +370,30 @@ class ReelsPlayers(
             }
 
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                if (current !== clip) return
                 failMessage = error.message ?: error.errorCodeName
                 onEvent(clip.item, "fail", clip.watchedMs, null, positionMs, error.errorCodeName)
             }
         })
 
+        startPolling(clip)
+
+        // 字幕：窗口抽取的那一小段（整轨要 NAS 通读整个文件，等不到）
+        val sub = subtitleUrlFor(clip.item)
+        if (sub != null) {
+            clip.subtitleJob = scope.launch {
+                val bytes = withContext(Dispatchers.IO) {
+                    runCatching { java.net.URL(sub).openStream().use { it.readBytes() } }.getOrNull()
+                } ?: return@launch
+                if (current === clip) cues = SubtitleCues.parse(bytes)
+            }
+        }
+    }
+
+    /** 重播重新建立终点与字幕位置监控。 */
+    private fun startPolling(clip: Clip) {
+        clip.pollJob?.cancel()
+        val engine = clip.engine
         clip.pollJob = scope.launch {
             while (isActive) {
                 delay(250)
@@ -376,17 +413,6 @@ class ReelsPlayers(
                     onEvent(clip.item, "complete", clip.watchedMs, null, clip.item.segment.endMs, null)
                     break
                 }
-            }
-        }
-
-        // 字幕：窗口抽取的那一小段（整轨要 NAS 通读整个文件，等不到）
-        val sub = subtitleUrlFor(clip.item)
-        if (sub != null) {
-            clip.subtitleJob = scope.launch {
-                val bytes = withContext(Dispatchers.IO) {
-                    runCatching { java.net.URL(sub).openStream().use { it.readBytes() } }.getOrNull()
-                } ?: return@launch
-                cues = SubtitleCues.parse(bytes)
             }
         }
     }
@@ -447,6 +473,7 @@ class ReelsPlayers(
         ended = false
         playing = true
         clip.engine.setPlaying(true)
+        startPolling(clip)
     }
 
     fun replay() {
@@ -457,6 +484,7 @@ class ReelsPlayers(
         clip.engine.setPlaying(true)
         clip.startedAtMs = android.os.SystemClock.elapsedRealtime()
         clip.watchedMs = 0L
+        startPolling(clip)
     }
 
     fun seekBy(deltaMs: Long) {
@@ -478,6 +506,10 @@ class ReelsPlayers(
 
     /** 页面切走 / 退出：停声、拆引擎、停会话、取消预取 */
     fun release() {
+        settleSeq += 1
+        settleJob?.cancel()
+        settleJob = null
+        pendingTeardowns.flush()
         leaveCurrent(deferTeardown = false)
         dropStandby()
         prefetchJobs.values.forEach { it.cancel() }
@@ -507,10 +539,7 @@ class ReelsPlayers(
         android.util.Log.i("McReels", "收引擎：${clip.item.title.name}")
         if (deferTeardown) {
             engine.setPlaying(false)
-            scope.launch {
-                delay(500)
-                engine.release()
-            }
+            pendingTeardowns.defer(engine)
         } else {
             engine.release()
         }
@@ -540,7 +569,8 @@ class ReelsPlayers(
             if (prefetchJobs.containsKey(key) || prefetchJobs.containsKey("${item.id}#full")) return@forEachIndexed
             val raw = item.play.streamUrl ?: return@forEachIndexed
             val url = if (raw.startsWith("http")) raw else (originProvider()?.trimEnd('/') ?: return@forEachIndexed) + raw
-            val cacheKey = SourceByteCache.key(item.segment.fileId, item.play.sizeBytes) ?: return@forEachIndexed
+            val origin = originProvider() ?: return@forEachIndexed
+            val cacheKey = SourceByteCache.key(item.segment.fileId, item.play.sizeBytes, origin) ?: return@forEachIndexed
             val ranges = item.play.prefetch
                 .filter { full || it.purpose != "start" }
                 .map { it.offset to it.length }
@@ -667,20 +697,31 @@ class ReelsPlayers(
     /* ---------------- 转码会话续命 ---------------- */
 
     private var liveSessionId: String? = null
+    private var liveSessionApi: McApi? = null
 
-    private fun startPing(sessionId: String?) {
+    private fun startPing(sessionId: String?, api: McApi?) {
         pingJob?.cancel()
         if (sessionId == null) {
             liveSessionId = null
             return
         }
         liveSessionId = sessionId
+        liveSessionApi = api
         pingJob = scope.launch {
             while (isActive) {
                 delay(15_000)
-                val origin = originProvider() ?: continue
+                val sessionApi = api ?: continue
                 // 三态同 iOS：只有服务端明确说没了才当没了，请求本身失败不算
-                runCatching { apiFactory.forOrigin(origin).pingPlaybackSession(sessionId) }
+                runCatching { sessionApi.pingPlaybackSession(sessionId) }
+            }
+        }
+    }
+
+    private suspend fun closeSession(id: String?, api: McApi?) {
+        if (id == null || api == null) return
+        withContext(NonCancellable) {
+            withTimeoutOrNull(5_000) {
+                runCatching { api.stopPlaybackSession(id) }
             }
         }
     }
@@ -688,7 +729,9 @@ class ReelsPlayers(
     private fun stopSession() {
         val id = liveSessionId ?: return
         liveSessionId = null
-        val origin = originProvider() ?: return
-        scope.launch { runCatching { apiFactory.forOrigin(origin).stopPlaybackSession(id) } }
+        val api = liveSessionApi
+        liveSessionApi = null
+        // 页面销毁后也要关闭远程会话，独立收尾任务限时五秒。
+        CoroutineScope(Dispatchers.Main.immediate).launch { closeSession(id, api) }
     }
 }
