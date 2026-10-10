@@ -498,7 +498,8 @@ internal fun ActiveDownloadRow(
         if (ingesting) {
             ingestJob?.progress?.message?.takeIf { it.isNotBlank() }?.let { add(it) }
         } else {
-            task.dlspeedBytes?.takeIf { it > 0 }?.let { add("↓ " + McFormat.rate(it.toDouble()) + "/s") }
+            // rate() 自带「↓」与「/s」（以前再拼一遍，显示成「↓ ↓ 137.7 KB/s/s」）
+            task.dlspeedBytes?.takeIf { it > 0 }?.let { add(McFormat.rate(it.toDouble())) }
             if (task.state == "downloading") {
                 task.etaSeconds?.takeIf { it > 0 }?.let { add("剩 " + McFormat.durationMinutes((it / 60).toInt())) }
             }
@@ -510,20 +511,24 @@ internal fun ActiveDownloadRow(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(7.dp).background(metaColor, CircleShape))
             Spacer(Modifier.width(8.dp))
-            Text(
-                group.title,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f, fill = false),
-            )
-            if (group.tasks.size > 1) {
-                Spacer(Modifier.width(6.dp))
-                Text("${group.tasks.size} 个资源", fontSize = 10.5.sp, color = TextFaint)
+            // 标题 + 资源数占满左侧，百分比贴右：以前标题与百分比前的占位各拿一份剩余宽度，
+            // 标题短时百分比落在卡片中间
+            Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    group.title,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                if (group.tasks.size > 1) {
+                    Spacer(Modifier.width(6.dp))
+                    Text("${group.tasks.size} 个资源", fontSize = 10.5.sp, color = TextFaint)
+                }
             }
             percent?.let {
-                Spacer(Modifier.weight(1f))
+                Spacer(Modifier.width(8.dp))
                 Text(
                     "${it.toInt()}%",
                     fontSize = 12.sp,

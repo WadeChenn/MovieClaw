@@ -326,22 +326,26 @@ class ActivityViewModel @Inject constructor(
     }
 
     private fun startPolling() {
+        // 先拉再等：以前先等 10 秒 / 8 秒才第一次拉，新开的页面（「进行中 · 查看全部」是一个新的
+        // ViewModel）头 10 秒拿不到下载任务——总览写着「进行中 · 5」，点进去却是「当前没有进行中的任务」
         pollJob = viewModelScope.launch {
             while (isActive) {
+                origin?.let { origin ->
+                    runCatching { apiFactory.forOrigin(origin).downloadTasks().dataOrThrow() }
+                        .onSuccess { tasks -> _ui.update { it.copy(downloads = tasks.items) } }
+                }
                 delay(10_000)
-                val origin = origin ?: continue
-                runCatching { apiFactory.forOrigin(origin).downloadTasks().dataOrThrow() }
-                    .onSuccess { tasks -> _ui.update { it.copy(downloads = tasks.items) } }
             }
         }
         viewModelScope.launch {
             while (isActive) {
+                origin?.let { origin ->
+                    runCatching { apiFactory.forOrigin(origin).playbackActivity().dataOrThrow() }
+                        .onSuccess { activity ->
+                            _ui.update { it.copy(sessions = activity.sessions, fileDownloads = activity.downloads) }
+                        }
+                }
                 delay(8_000)
-                val origin = origin ?: continue
-                runCatching { apiFactory.forOrigin(origin).playbackActivity().dataOrThrow() }
-                    .onSuccess { activity ->
-                        _ui.update { it.copy(sessions = activity.sessions, fileDownloads = activity.downloads) }
-                    }
             }
         }
     }
