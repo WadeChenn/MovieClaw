@@ -128,6 +128,33 @@ def test_successful_probe_marks_the_backend_available(monkeypatch, tmp_path):
     assert "vaapi" in hwprobe.available_backends()
 
 
+def test_qsv_probe_initialises_its_device_before_hwupload(monkeypatch, tmp_path):
+    """QSV 探测的合成源没有硬解这一步，hwupload 要靠显式建的设备。
+
+    缺了 ``-init_hw_device qsv=hw -filter_hw_device hw``，ffmpeg 报找不到设备，
+    能用的 Intel 核显被判成不可用（真机 UHD 630：手动带上这两项编码成功）。
+    """
+    dri = tmp_path / "dri"
+    dri.mkdir()
+    (dri / "renderD128").write_bytes(b"")
+    monkeypatch.setattr(hwprobe.shutil, "which", lambda _n: "/usr/bin/ffmpeg")
+    monkeypatch.setattr(hwprobe, "_list_encoders", lambda: frozenset({"h264_qsv"}))
+    monkeypatch.setattr(hwprobe, "Path", lambda _p: dri)
+    monkeypatch.setattr(hwprobe.os, "access", lambda *_a: True)
+    calls: list[list[str]] = []
+
+    def fake_run(argv, **_kwargs):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, b"", b"")
+
+    monkeypatch.setattr(hwprobe.subprocess, "run", fake_run)
+    assert status_of(hwprobe.probe_backends(), "qsv").available is True
+    (argv,) = [a for a in calls if "h264_qsv" in a]
+    assert argv[argv.index("-init_hw_device") + 1] == "qsv=hw"
+    assert argv[argv.index("-filter_hw_device") + 1] == "hw"
+    assert "hwupload" in argv[argv.index("-vf") + 1]
+
+
 def test_probe_timeout_is_reported_not_swallowed(monkeypatch, tmp_path):
     dri = tmp_path / "dri"
     dri.mkdir()

@@ -45,9 +45,15 @@ _PROBE_SOURCE = "testsrc2=size=320x240:rate=25:duration=1"
 
 #: 各后端的探测参数。与 ``ffmpeg_args.HW_BACKENDS`` 共用编码器名，避免两处漂移；
 #: 但**上传路径不同**——探测是软件源要送进 GPU，播放是 GPU 解码直连编码。
+#: QSV 的 ``hwupload`` 必须有显式的设备：播放命令靠 ``-hwaccel qsv`` 隐式建设备，
+#: 探测的合成源没有解码这一步，不先 ``-init_hw_device`` 就报「找不到设备」，
+#: 能用的 QSV 被判成不可用（真机：UHD 630 手动带上这两项编码成功）。
 _PROBE_FILTERS: dict[str, list[str]] = {
     "vaapi": ["-vaapi_device", "/dev/dri/renderD128", "-vf", "format=nv12,hwupload"],
-    "qsv": ["-vf", "format=nv12,hwupload=extra_hw_frames=64"],
+    "qsv": [
+        "-init_hw_device", "qsv=hw", "-filter_hw_device", "hw",
+        "-vf", "format=nv12,hwupload=extra_hw_frames=64",
+    ],
     "nvenc": ["-vf", "format=yuv420p"],
     "videotoolbox": ["-vf", "format=nv12"],
 }

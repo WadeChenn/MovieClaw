@@ -787,6 +787,58 @@ def test_degrade_skips_hardware_tier_without_gpu():
     assert decision.tier is PlaybackTier.SOFTWARE_TRANSCODE
 
 
+#: 真机片源：4K HEVC 8-bit SDR 的 MKV，单条 AAC；关键帧索引还没采样
+_UHD_HEVC_MKV = media(
+    video_codec="hevc",
+    resolution="2160p",
+    audio_tracks=(AAC_STEREO,),
+    keyframe_interval_s=None,
+)
+
+
+def test_copy_tiers_failing_twice_lands_on_hardware_transcode_with_gpu():
+    """浏览器申报能解 HEVC、实际 hls.js 报 bufferAddCodecError，档 1、2 连败。
+
+    网页状态机连败两次后带上来的是直通档 {0, 1, 2}——有显卡就该落档 3，
+    不能弹软件转码同意框。
+    """
+    failed = frozenset(
+        {PlaybackTier.DIRECT_PLAY, PlaybackTier.REMUX, PlaybackTier.AUDIO_TRANSCODE}
+    )
+    assert not needs_keyframe_probe(_UHD_HEVC_MKV, CHROME_HEVC, WITH_GPU, failed_tiers=failed)
+    decision = decide_playback(_UHD_HEVC_MKV, CHROME_HEVC, WITH_GPU, failed_tiers=failed)
+    assert isinstance(decision, PlaybackPlan)
+    assert decision.tier is PlaybackTier.HARDWARE_TRANSCODE
+    assert decision.video.action == "transcode"
+
+
+def test_copy_tiers_failing_twice_without_gpu_still_asks_for_software_consent():
+    failed = frozenset(
+        {PlaybackTier.DIRECT_PLAY, PlaybackTier.REMUX, PlaybackTier.AUDIO_TRANSCODE}
+    )
+    decision = decide_playback(_UHD_HEVC_MKV, CHROME_HEVC, NO_GPU, failed_tiers=failed)
+    assert isinstance(decision, ConsentRequired)
+    assert decision.tier is PlaybackTier.SOFTWARE_TRANSCODE
+
+
+def test_hardware_tier_reported_failed_falls_to_software_consent():
+    """硬件档真失败过（带着档 3 回来）才落档 4——这正是旧网页把没试过的档 3
+    也标失败时用户看到的同意框（理由里带「关键帧索引尚未就绪」+「已自动降档」）。"""
+    failed = frozenset(
+        {
+            PlaybackTier.DIRECT_PLAY,
+            PlaybackTier.REMUX,
+            PlaybackTier.AUDIO_TRANSCODE,
+            PlaybackTier.HARDWARE_TRANSCODE,
+        }
+    )
+    decision = decide_playback(_UHD_HEVC_MKV, CHROME_HEVC, WITH_GPU, failed_tiers=failed)
+    assert isinstance(decision, ConsentRequired)
+    assert decision.tier is PlaybackTier.SOFTWARE_TRANSCODE
+    assert "关键帧索引尚未就绪" in decision.reason
+    assert "已自动降档" in decision.reason
+
+
 def test_all_tiers_failed_is_rejected_with_suggestion():
     decision = decide_playback(
         media(),
