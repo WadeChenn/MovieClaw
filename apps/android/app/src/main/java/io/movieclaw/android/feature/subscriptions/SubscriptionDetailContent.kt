@@ -443,7 +443,60 @@ private fun DownloadRow(units: List<WantedView>, d: SubscriptionDownloadView) {
             }
             Spacer(Modifier.height(4.dp))
             Text(downloadNote(d), fontSize = 11.5.sp, color = TextMuted, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            // 包内每集的进度（服务端按单文件完成字节算；速度只有整包的）
+            val perEpisode = packEpisodeProgress(units, d)
+            if (perEpisode.isNotEmpty()) {
+                Spacer(Modifier.height(10.dp))
+                EpisodeProgressGrid(perEpisode)
+            }
         }
+    }
+}
+
+/** 包内各集进度：挂了多集、且服务端给了单集进度时才有（顺序同集号） */
+internal fun packEpisodeProgress(units: List<WantedView>, d: SubscriptionDownloadView): List<Pair<Int, Double>> {
+    if (units.size < 2) return emptyList()
+    val byUnit = d.units.associateBy({ it.seasonNumber to it.episodeNumber }, { it.progress })
+    val pairs = units.mapNotNull { u -> byUnit[u.seasonNumber to u.episodeNumber]?.let { u.episodeNumber to it } }
+    return if (pairs.isEmpty()) emptyList() else pairs.sortedBy { it.first }
+}
+
+/** 一格一集：集号 + 底部细进度 + 百分比；下完的打勾。超过 24 集折叠 */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun EpisodeProgressGrid(episodes: List<Pair<Int, Double>>) {
+    var expanded by remember { mutableStateOf(false) }
+    val shown = if (expanded || episodes.size <= 24) episodes else episodes.take(24)
+    androidx.compose.foundation.layout.FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        shown.forEach { (ep, p) ->
+            val done = p >= 0.999
+            Column(
+                Modifier.width(62.dp).clip(RoundedCornerShape(8.dp))
+                    .background(if (done) Ok.copy(alpha = 0.12f) else Color.White.copy(alpha = 0.06f)),
+            ) {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 7.dp, vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("E$ep", fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        if (done) "✓" else "${(p * 100).toInt().coerceIn(0, 99)}%",
+                        fontSize = 10.5.sp, color = if (done) Ok else TextMuted,
+                    )
+                }
+                Box(Modifier.fillMaxWidth().height(2.dp).background(Color.White.copy(alpha = 0.06f))) {
+                    Box(Modifier.fillMaxWidth(p.toFloat().coerceIn(0f, 1f)).height(2.dp).background(if (done) Ok else Downloading))
+                }
+            }
+        }
+    }
+    if (episodes.size > 24) {
+        Text(
+            if (expanded) "收起" else "展开全部 ${episodes.size} 集",
+            fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF9FB0C9),
+            modifier = Modifier.padding(top = 8.dp).clip(RoundedCornerShape(6.dp)).clickable { expanded = !expanded }.padding(vertical = 2.dp),
+        )
     }
 }
 

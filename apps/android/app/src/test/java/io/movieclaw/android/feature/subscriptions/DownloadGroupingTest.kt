@@ -26,6 +26,20 @@ class DownloadGroupingTest {
         assertEquals(listOf("E90–E102 · 13 集"), rows.map { downloadUnitsLabel(it.first) })
     }
 
+    @Test fun packEpisodesCarryTheirOwnProgress() {
+        val units = (84..86).map { unit(it, "pack") }
+        val snap = dl("pack").copy(
+            units = listOf(
+                io.movieclaw.android.core.model.DownloadUnitView(1, 84, 1.0),
+                io.movieclaw.android.core.model.DownloadUnitView(1, 85, 0.45),
+                io.movieclaw.android.core.model.DownloadUnitView(1, 86, null),  // 认不出集号：不给
+            ),
+        )
+        assertEquals(listOf(84 to 1.0, 85 to 0.45), packEpisodeProgress(units, snap))
+        // 单集种子不出格子：整包进度就是这一集的
+        assertEquals(emptyList<Pair<Int, Double>>(), packEpisodeProgress(listOf(unit(104, "b")), dl("b")))
+    }
+
     @Test fun absurdEtaReadsAsSlow() {
         val note = downloadNote(SubscriptionDownloadView(infoHash = "x", state = "downloading", progress = 0.0, dlspeedBytes = 3, etaSeconds = 6_369_840))
         assertEquals(true, note.contains("速度很慢"))
