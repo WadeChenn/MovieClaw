@@ -1137,4 +1137,19 @@ interface McApi {
     @Multipart
     @POST("sessions/attachments")
     suspend fun uploadAgentAttachment(@Part file: MultipartBody.Part): McEnvelope<AgentAttachment>
+
+    // ---- 实时通知（服务端 cloud-push.md §4.1；长连接 /push/me/stream 见 core/push）----
+
+    @PUT("push/me/registration")
+    suspend fun pushRegister(
+        @Body body: io.movieclaw.android.core.model.PushRegistrationBody,
+    ): McEnvelope<io.movieclaw.android.core.model.PushRegistrationView>
+
+    @POST("push/me/ack")
+    suspend fun pushAck(
+        @Body body: io.movieclaw.android.core.model.PushAckBody,
+    ): McEnvelope<io.movieclaw.android.core.model.PushAckView>
+
+    @POST("push/me/test")
+    suspend fun pushTest(): McEnvelope<io.movieclaw.android.core.model.PushTestView>
 }
