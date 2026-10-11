@@ -162,10 +162,10 @@ internal fun SubscriptionDetailContent(
                     }
                 } else if (wanted.isNotEmpty()) {
                     // 电影只有一个单元：在途时把实时进度放进一张卡里
-                    val live = wanted.mapNotNull { u -> u.infoHash?.let { downloads[it] }?.let { u to it } }
+                    val live = liveDownloads(wanted, downloads)
                     if (live.isNotEmpty()) {
                         SectionTitle("下载进度")
-                        Card { live.forEach { (u, d) -> DownloadRow(u, d) } }
+                        Card { live.forEach { (units, d) -> DownloadRow(units, d) } }
                     }
                 }
                 if (activities.isNotEmpty()) {
@@ -400,27 +400,41 @@ private fun SeasonCard(season: Int, items: List<WantedView>, downloads: Map<Stri
             }
         }
         // 在途投递的实时进度（5 秒轮询）：按单元锚定的种子 hash 对上
-        val live = items.mapNotNull { u -> u.infoHash?.let { downloads[it] }?.let { u to it } }
+        val live = liveDownloads(items, downloads)
         if (live.isNotEmpty()) {
             Spacer(Modifier.height(12.dp))
-            live.forEach { (u, d) -> DownloadRow(u, d) }
+            live.forEach { (units, d) -> DownloadRow(units, d) }
         }
     }
 }
 
-/** 一集的下载：集号徽标 + 细进度条 + 速度/剩余 */
+/**
+ * 在途下载按**种子**分组：一个全集包挂着几十集时只出一行（以前一集一行，
+ * 同一个任务的进度/速度重复印几十遍，看着像每集都卡在同一个进度）
+ */
+internal fun liveDownloads(
+    units: List<WantedView>,
+    downloads: Map<String, SubscriptionDownloadView>,
+): List<Pair<List<WantedView>, SubscriptionDownloadView>> =
+    units.filter { u -> u.infoHash?.let { downloads[it] } != null }
+        .groupBy { it.infoHash!! }
+        .map { (hash, group) -> group.sortedBy { it.episodeNumber } to downloads.getValue(hash) }
+
+/** 一组单元的集号：「E104」/「E84–E102 · 19 集」/「全片」 */
+internal fun downloadUnitsLabel(units: List<WantedView>): String {
+    val eps = units.filter { it.episodeNumber > 0 }.map { it.episodeNumber }
+    if (eps.isEmpty()) return unitLabel(units.first())
+    val ranges = episodeRanges(eps).replace(Regex("E0*(\\d)"), "E$1")
+    return if (eps.size == 1) ranges else "$ranges · ${eps.size} 集"
+}
+
+/** 一个种子的下载：集号 + 细进度条 + 速度/剩余 */
 @Composable
-private fun DownloadRow(unit: WantedView, d: SubscriptionDownloadView) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(
-            if (unit.episodeNumber > 0) "E${unit.episodeNumber}" else unitLabel(unit),
-            fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary,
-            modifier = Modifier.width(52.dp).clip(RoundedCornerShape(6.dp)).background(Color.White.copy(alpha = 0.08f))
-                .padding(vertical = 3.dp),
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-        )
-        Spacer(Modifier.width(10.dp))
+private fun DownloadRow(units: List<WantedView>, d: SubscriptionDownloadView) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
+            Text(downloadUnitsLabel(units), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Spacer(Modifier.height(6.dp))
             val frac = (d.progress ?: 0.0).toFloat().coerceIn(0f, 1f)
             Box(Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(999.dp)).background(Color.White.copy(alpha = 0.08f))) {
                 Box(Modifier.fillMaxWidth(frac).height(4.dp).background(if (d.state == "error") io.movieclaw.android.core.designsystem.Danger else Downloading))

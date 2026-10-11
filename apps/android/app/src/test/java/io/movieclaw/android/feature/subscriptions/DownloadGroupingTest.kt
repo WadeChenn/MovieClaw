@@ -1,0 +1,25 @@
+package io.movieclaw.android.feature.subscriptions
+
+import io.movieclaw.android.core.model.SubscriptionDownloadView
+import io.movieclaw.android.core.model.WantedView
+import org.junit.Assert.assertEquals
+import org.junit.Test
+
+/** 订阅详情的在途下载：一个种子一行（《牧神记》实例：E84–E102 同一个全集包） */
+class DownloadGroupingTest {
+    private fun unit(ep: Int, hash: String?) = WantedView(id = ep.toLong(), seasonNumber = 1, episodeNumber = ep, status = "grabbed", infoHash = hash)
+    private fun dl(hash: String) = SubscriptionDownloadView(infoHash = hash, state = "downloading", progress = 0.0011)
+
+    @Test fun packEpisodesCollapseIntoOneRow() {
+        val units = (84..102).map { unit(it, "pack") } + unit(103, "a") + unit(104, "b") + unit(105, null)
+        val rows = liveDownloads(units, mapOf("pack" to dl("pack"), "a" to dl("a"), "b" to dl("b")))
+        assertEquals(3, rows.size)
+        assertEquals(listOf("E84–E102 · 19 集", "E103", "E104"), rows.map { downloadUnitsLabel(it.first) })
+    }
+
+    @Test fun absurdEtaReadsAsSlow() {
+        val note = downloadNote(SubscriptionDownloadView(infoHash = "x", state = "downloading", progress = 0.0, dlspeedBytes = 3, etaSeconds = 6_369_840))
+        assertEquals(true, note.contains("速度很慢"))
+        assertEquals(false, note.contains("小时"))
+    }
+}
