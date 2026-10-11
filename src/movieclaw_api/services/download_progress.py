@@ -1178,13 +1178,38 @@ def _observed_units(files) -> set[tuple[int, int]]:
         # 没有选中信息的文件（旧适配器 / 测试替身）按选中算，与 TorrentFile 默认一致
         if not getattr(file, "selected", True):
             continue
-        for match in _FILE_UNIT_RE.finditer(file.path):
-            season = int(match.group(1))
-            numbers = [int(n) for n in _FILE_EP_RE.findall(match.group(2))]
-            if len(numbers) == 2 and numbers[0] < numbers[1] <= numbers[0] + 200:
-                numbers = list(range(numbers[0], numbers[1] + 1))
-            observed.update((season, episode) for episode in numbers)
+        observed.update(_path_units(file.path))
     return observed
+
+
+def _path_units(path: str) -> set[tuple[int, int]]:
+    """一个文件路径里能认出的 (季, 集)；口径见 :func:`_observed_units`。"""
+    units: set[tuple[int, int]] = set()
+    for match in _FILE_UNIT_RE.finditer(path):
+        season = int(match.group(1))
+        numbers = [int(n) for n in _FILE_EP_RE.findall(match.group(2))]
+        if len(numbers) == 2 and numbers[0] < numbers[1] <= numbers[0] + 200:
+            numbers = list(range(numbers[0], numbers[1] + 1))
+        units.update((season, episode) for episode in numbers)
+    return units
+
+
+def _unit_progress(files) -> dict[tuple[int, int], float]:
+    """包内每一集的下载进度 0..1：按认得出该集的**已选中**文件的完成字节合计。
+
+    大包按单集分批入库，订阅详情要能看出「哪几集已经下完、哪几集还早」；
+    速度下载器只按整个种子给，单集只有进度。认不出集号、或适配器没报
+    单文件完成字节的，不给（调用方显示整包进度）。
+    """
+    done: dict[tuple[int, int], int] = {}
+    size: dict[tuple[int, int], int] = {}
+    for file in files:
+        if not getattr(file, "selected", True) or file.completed_bytes is None:
+            continue
+        for unit in _path_units(file.path):
+            done[unit] = done.get(unit, 0) + file.completed_bytes
+            size[unit] = size.get(unit, 0) + file.size_bytes
+    return {unit: done[unit] / size[unit] for unit in size if size[unit] > 0}
 
 
 async def _verify_content(
@@ -1366,10 +1391,12 @@ async def subscription_download_snapshot(session: AsyncSession, subscription_id:
             {"season_number": w.season_number, "episode_number": w.episode_number}
             for w in sorted(rows, key=lambda w: (w.season_number, w.episode_number))
         ]
-        # 快照只用 info 字段（进度/速度/ETA），不取文件清单——5 秒一轮的
-        # 轮询没必要每次都把整包文件列表拉回来
+        # 单集种子只用 info 字段（进度/速度/ETA）：整包进度就是这一集的进度。
+        # 挂了多集的包才取文件清单，给出每集各自的进度（5 秒一轮的轮询，
+        # 单集种子不必每次把文件列表拉回来）
+        multi = len(units) > 1
         found = (
-            await _query_torrent(info_hash, downloaders, include_files=False)
+            await _query_torrent(info_hash, downloaders, include_files=multi)
             if downloaders
             else None
         )
@@ -1389,6 +1416,10 @@ async def subscription_download_snapshot(session: AsyncSession, subscription_id:
             )
             continue
         downloader_row, status = found
+        if multi:
+            per_unit = _unit_progress(status.files)
+            for unit in units:
+                unit["progress"] = per_unit.get((unit["season_number"], unit["episode_number"]))
         snapshots.append(
             {
                 "info_hash": info_hash,

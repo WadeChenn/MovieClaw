@@ -2739,10 +2739,13 @@ nonisolated extension API {
     struct DownloadUnitView: Codable, Hashable, Sendable {
         var seasonNumber: Int
         var episodeNumber: Int
+        /// 下载快照里这一集的进度 0.0~1.0（挂了多集的包按单文件完成字节算）；单集种子、认不出集号或手动选种结果为空——看整包进度
+        var progress: Double?
 
         enum CodingKeys: String, CodingKey {
             case seasonNumber = "season_number"
             case episodeNumber = "episode_number"
+            case progress
         }
     }
 
