@@ -115,7 +115,11 @@ class PushStreamTest {
     }
 
     @Test fun `one connection replays then ends when server closes`() = runBlocking {
+        val status = """{"server":"家里的 NAS","today":{"imported":5,"updated":2},"downloads":{"active":1,""" +
+            """"speed":6500000,"progress":0.5,"items":[{"title":"遮天","episode":"E135","progress":0.5,"eta":540,"state":"downloading"}]}}"""
         val body = ": connected\n\n" +
+            "event: status\ndata: $status\n\n" +
+            "event: status\ndata: {broken\n\n" +
             "id: 5\nevent: notification\ndata: ${data(5, "第一条")}\n\n" +
             ": heartbeat\n\n" +
             "event: other\ndata: {}\n\n" +
@@ -128,6 +132,12 @@ class PushStreamTest {
         val items = signals.filterIsInstance<StreamSignal.Notification>().map { it.item }
         assertEquals(listOf(5L, 6L), items.map { it.id })
         assertEquals(listOf("第一条", "第二条"), items.map { it.title })
+        // 状态快照：坏的那帧丢掉，不影响通知
+        val snapshot = signals.filterIsInstance<StreamSignal.Status>().single().snapshot
+        assertEquals("家里的 NAS", snapshot.server)
+        assertEquals(5, snapshot.today.imported)
+        assertEquals("E135", snapshot.downloads!!.items.single().episode)
+        assertEquals(6_500_000L, snapshot.downloads!!.speed)
         val request = server.takeRequest()
         assertEquals("/api/v1/push/me/stream", request.requestUrl!!.encodedPath)
         assertEquals("4", request.requestUrl!!.queryParameter("since"))

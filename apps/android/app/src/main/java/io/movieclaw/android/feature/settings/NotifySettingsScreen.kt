@@ -28,6 +28,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material.icons.Icons
@@ -72,6 +78,9 @@ import io.movieclaw.android.core.network.friendlyMessage
 import io.movieclaw.android.core.notify.NotifyPrefs
 import io.movieclaw.android.core.notify.NotifyScheduler
 import io.movieclaw.android.core.push.BackgroundGuide
+import io.movieclaw.android.core.push.OngoingMode
+import io.movieclaw.android.core.push.OngoingNotice
+import io.movieclaw.android.core.push.OngoingView
 import io.movieclaw.android.core.push.PushStreamController
 import io.movieclaw.android.core.push.PushStreamKeepAlive
 import io.movieclaw.android.core.push.PushStreamPrefs
@@ -81,6 +90,7 @@ import io.movieclaw.android.core.session.SessionRepository
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import android.app.Application
 import retrofit2.HttpException
@@ -114,6 +124,9 @@ data class NotifySettingsState(
     /** 服务器推送哪些事（账号级，与 iOS、网页共用）；null = 还没取到 */
     val events: List<PushEventPref>? = null,
     val eventsError: String? = null,
+    /** 常驻通知显示什么（本机设置） */
+    val ongoingMode: OngoingMode = OngoingMode.SMART,
+    val ongoingTemplate: String = "",
 )
 
 @HiltViewModel
@@ -139,6 +152,8 @@ class NotifySettingsViewModel @Inject constructor(
                 subscription = s.subscription,
                 task = s.task,
                 stream = streamPrefs.enabled(),
+                ongoingMode = streamPrefs.ongoingMode.first(),
+                ongoingTemplate = streamPrefs.ongoingTemplate.first(),
             )
             // 已开启却没排程（重装 / 清数据 / 系统撤销）时补上
             if (s.enabled) NotifyScheduler.schedule(app)
@@ -237,6 +252,11 @@ class NotifySettingsViewModel @Inject constructor(
             )
             _ui.value = _ui.value.copy(testing = false, streamMessage = message)
         }
+    }
+
+    fun setOngoing(mode: OngoingMode = _ui.value.ongoingMode, template: String = _ui.value.ongoingTemplate) {
+        _ui.value = _ui.value.copy(ongoingMode = mode, ongoingTemplate = template)
+        viewModelScope.launch { streamPrefs.setOngoing(mode, template) }
     }
 
     fun dismissGuide() {
@@ -412,6 +432,16 @@ private fun StreamSection(
                 PillButton("后台运行设置", onClick = vm::openGuide)
             }
         }
+        val snapshot by PushStreamState.snapshot.collectAsState()
+        Spacer(Modifier.height(18.dp))
+        OngoingSection(
+            mode = state.ongoingMode,
+            template = state.ongoingTemplate,
+            // 预览按「已连接」画内容；连接状态看上面那张卡
+            preview = OngoingNotice.build(state.ongoingMode, state.ongoingTemplate, PushStreamStatus.Connected(0), snapshot),
+            onMode = { vm.setOngoing(mode = it) },
+            onTemplate = { vm.setOngoing(template = it) },
+        )
         EventPrefsSection(state = state, onToggle = vm::setEvent)
     } else {
         state.streamMessage?.let {
@@ -421,6 +451,202 @@ private fun StreamSection(
                 color = TextMuted,
                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
             )
+        }
+    }
+}
+
+/** 常驻通知显示：单选卡片 + 自定义文字（emoji、变量快捷）+ 实时预览 */
+@Composable
+internal fun OngoingSection(
+    mode: OngoingMode,
+    template: String,
+    preview: OngoingView,
+    onMode: (OngoingMode) -> Unit,
+    onTemplate: (String) -> Unit,
+) {
+    var field by remember { mutableStateOf(TextFieldValue(template)) }
+    fun insert(token: String) {
+        val start = minOf(field.selection.start, field.selection.end)
+        val end = maxOf(field.selection.start, field.selection.end)
+        field = TextFieldValue(field.text.replaceRange(start, end, token), TextRange(start + token.length))
+        onTemplate(field.text)
+    }
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(FillCard)
+            .border(1.dp, LineSoft, RoundedCornerShape(18.dp))
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text("常驻通知显示", style = McType.subheadlineSemibold, modifier = Modifier.padding(start = 2.dp, bottom = 4.dp))
+        OngoingMode.entries.forEach { option ->
+            OngoingOption(option, selected = option == mode, onClick = { onMode(option) }) {
+                if (option != OngoingMode.CUSTOM) return@OngoingOption
+                Spacer(Modifier.height(10.dp))
+                OutlinedTextField(
+                    value = field,
+                    onValueChange = {
+                        field = it
+                        onTemplate(it.text)
+                    },
+                    singleLine = true,
+                    placeholder = { Text(OngoingNotice.DEFAULT_TEMPLATE, style = McType.footnote, color = TextFaint) },
+                    colors = settingsFieldColors(),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(10.dp))
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OngoingNotice.EMOJIS.forEach { emoji ->
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Color.White.copy(alpha = 0.06f))
+                                .clickable { insert(emoji) },
+                        ) { Text(emoji, fontSize = 20.sp) }
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OngoingNotice.VARIABLES.forEach { variable ->
+                        Text(
+                            variable,
+                            style = McType.caption,
+                            color = TextMuted,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color.White.copy(alpha = 0.06f))
+                                .clickable { insert(variable) }
+                                .padding(horizontal = 10.dp, vertical = 5.dp),
+                        )
+                    }
+                }
+            }
+        }
+    }
+    Text(
+        "效果预览",
+        style = McType.caption,
+        color = TextFaint,
+        modifier = Modifier.padding(start = 6.dp, top = 14.dp, bottom = 6.dp),
+    )
+    OngoingPreview(preview)
+}
+
+@Composable
+private fun OngoingOption(
+    mode: OngoingMode,
+    selected: Boolean,
+    onClick: () -> Unit,
+    extra: @Composable () -> Unit,
+) {
+    val shape = RoundedCornerShape(14.dp)
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(Color.White.copy(alpha = if (selected) 0.06f else 0.03f))
+            .border(if (selected) 1.5.dp else 1.dp, if (selected) TextPrimary.copy(alpha = 0.85f) else LineSoft, shape)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+    ) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+                .size(22.dp)
+                .border(2.dp, if (selected) TextPrimary else TextFaint, CircleShape),
+        ) {
+            if (selected) Box(Modifier.size(10.dp).background(TextPrimary, CircleShape))
+        }
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(mode.title, style = McType.bodySemibold, color = TextPrimary)
+                if (mode == OngoingMode.SMART) {
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        "推荐",
+                        style = McType.captionSemibold,
+                        color = AccentStrong,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(AccentSoft)
+                            .padding(horizontal = 7.dp, vertical = 1.dp),
+                    )
+                }
+            }
+            Spacer(Modifier.height(2.dp))
+            Text(mode.subtitle, style = McType.caption, color = TextMuted)
+            extra()
+        }
+    }
+}
+
+/** 照着系统通知的样子画：图标、标题、正文、进度条、展开的列表、按钮 */
+@Composable
+private fun OngoingPreview(view: OngoingView) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(22.dp))
+            .background(Color(0xFF1E1F23))
+            .padding(14.dp),
+    ) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+                .size(40.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(Color.Black),
+        ) {
+            Icon(
+                painterResource(io.movieclaw.android.R.drawable.ic_mc_notify),
+                contentDescription = null,
+                tint = TextPrimary,
+                modifier = Modifier.size(22.dp),
+            )
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.Top) {
+                Text(view.title, style = McType.bodySemibold, color = TextPrimary, modifier = Modifier.weight(1f))
+                Text("现在", style = McType.caption, color = TextFaint)
+            }
+            if (view.lines.isEmpty()) {
+                Text(view.text, style = McType.caption, color = TextMuted)
+            } else {
+                view.lines.forEach { Text(it, style = McType.caption, color = TextMuted, modifier = Modifier.padding(top = 3.dp)) }
+            }
+            if (view.progress != null) {
+                Spacer(Modifier.height(10.dp))
+                if (view.indeterminate) {
+                    LinearProgressIndicator(Modifier.fillMaxWidth(), color = Accent, trackColor = Color.White.copy(alpha = 0.1f))
+                } else {
+                    LinearProgressIndicator(
+                        progress = { view.progress / 100f },
+                        modifier = Modifier.fillMaxWidth(),
+                        color = Accent,
+                        trackColor = Color.White.copy(alpha = 0.1f),
+                    )
+                }
+            }
+            if (view.openDownloads) {
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    "打开下载",
+                    style = McType.captionSemibold,
+                    color = TextPrimary,
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(Color.White.copy(alpha = 0.08f))
+                        .padding(horizontal = 14.dp, vertical = 7.dp),
+                )
+            }
         }
     }
 }
@@ -634,3 +860,14 @@ private fun NotifyRow(
         )
     }
 }
+
+@Composable
+private fun settingsFieldColors() = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+    focusedContainerColor = Color.White.copy(alpha = 0.055f),
+    unfocusedContainerColor = Color.White.copy(alpha = 0.055f),
+    focusedBorderColor = Accent.copy(alpha = 0.45f),
+    unfocusedBorderColor = Color.White.copy(alpha = 0.1f),
+    focusedTextColor = Color.White,
+    unfocusedTextColor = Color.White,
+    cursorColor = Accent,
+)

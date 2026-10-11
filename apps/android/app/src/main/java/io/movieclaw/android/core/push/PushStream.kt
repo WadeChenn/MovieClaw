@@ -20,7 +20,8 @@ import okhttp3.sse.EventSources
  * 服务器发来的一条通知长什么样、落到哪个通知渠道 / 哪个页面、重连退避、单次 SSE 连接。
  *
  * 服务端协议（docs/design/cloud-push.md §4.1）：GET /push/me/stream?since=<id>，
- * `id: <发件箱 id>` + `event: notification` + `data: <JSON>`；空闲时 `: heartbeat` 注释。
+ * `id: <发件箱 id>` + `event: notification` + `data: <JSON>`；空闲时 `: heartbeat` 注释；
+ * 另有不带 id 的 `event: status`（状态快照，常驻通知用，见 OngoingNotice.kt）。
  */
 
 /** 服务器发件箱里的一条通知（字段见服务端 notify._stream_payload） */
@@ -134,6 +135,7 @@ class Backoff(
 sealed interface StreamSignal {
     data object Opened : StreamSignal
     data class Notification(val item: StreamNotification) : StreamSignal
+    data class Status(val snapshot: StreamStatusSnapshot) : StreamSignal
 }
 
 /** HTTP 层面的失败（带状态码，409 = 服务器上还没登记成实时通知设备） */
@@ -160,6 +162,11 @@ object PushStreamConnection {
             }
 
             override fun onEvent(eventSource: EventSource, id: String?, type: String?, data: String) {
+                if (type == "status") {
+                    runCatching { json.decodeFromString(StreamStatusSnapshot.serializer(), data) }
+                        .onSuccess { trySend(StreamSignal.Status(it)) }
+                    return
+                }
                 if (type != "notification") return
                 val item = StreamNotifications.parse(json, data) ?: return
                 if (trySend(StreamSignal.Notification(item)).isFailure) {

@@ -18,6 +18,7 @@ import androidx.core.content.ContextCompat
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.longPreferencesKey
+import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingPeriodicWorkPolicy
@@ -46,9 +47,11 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
@@ -72,7 +75,7 @@ import retrofit2.HttpException
 
 private val Context.pushStreamStore by preferencesDataStore(name = "mc_push_stream")
 
-/** 开关、每个账号的游标、最近一次确认连接健康的时间（跨进程，NotifyWorker 也要读） */
+/** 开关、每个账号的游标、最近一次确认连接健康的时间（跨进程，NotifyWorker 也要读）、常驻通知显示什么 */
 class PushStreamPrefs(private val context: Context) {
     suspend fun enabled(): Boolean = context.pushStreamStore.data.first()[KEY_ENABLED] ?: false
 
@@ -95,9 +98,23 @@ class PushStreamPrefs(private val context: Context) {
         context.pushStreamStore.edit { it[KEY_HEALTHY_AT] = now }
     }
 
+    val ongoingMode: Flow<OngoingMode> = context.pushStreamStore.data.map { OngoingMode.of(it[KEY_ONGOING_MODE]) }
+
+    /** 自定义文字（空 = 用 [OngoingNotice.DEFAULT_TEMPLATE]） */
+    val ongoingTemplate: Flow<String> = context.pushStreamStore.data.map { it[KEY_ONGOING_TEMPLATE].orEmpty() }
+
+    suspend fun setOngoing(mode: OngoingMode, template: String) {
+        context.pushStreamStore.edit {
+            it[KEY_ONGOING_MODE] = mode.key
+            it[KEY_ONGOING_TEMPLATE] = template
+        }
+    }
+
     companion object {
         private val KEY_ENABLED = booleanPreferencesKey("enabled")
         private val KEY_HEALTHY_AT = longPreferencesKey("healthy_at")
+        private val KEY_ONGOING_MODE = stringPreferencesKey("ongoing_mode")
+        private val KEY_ONGOING_TEMPLATE = stringPreferencesKey("ongoing_template")
 
         /** 游标按「服务器 + 账号」分开：发件箱 id 只在同一台服务器的同一台设备上单调 */
         fun cursorKey(origin: String, username: String) = "cursor:$origin|$username"
@@ -118,6 +135,14 @@ object PushStreamState {
 
     internal fun set(value: PushStreamStatus) {
         _status.value = value
+    }
+
+    /** 当前连接上最近一帧状态快照；换连接时清空（不拿上一条连接的旧数据充数） */
+    private val _snapshot = MutableStateFlow<StreamStatusSnapshot?>(null)
+    val snapshot: StateFlow<StreamStatusSnapshot?> = _snapshot.asStateFlow()
+
+    internal fun setSnapshot(value: StreamStatusSnapshot?) {
+        _snapshot.value = value
     }
 
     /** 服务端协议里实时通知设备的「通道名」（PushRegistrationView.channel_name） */
@@ -179,7 +204,7 @@ class PushStreamService : Service() {
     @Volatile private var connectionNetwork: Network? = null
     @Volatile private var currentNetwork: Network? = null
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
-    private var shownText: String? = null
+    private var shown: OngoingView? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -195,7 +220,14 @@ class PushStreamService : Service() {
             }
         }
         scope.launch {
-            PushStreamState.status.collect { status -> updateForeground(textFor(status)) }
+            val prefs = PushStreamPrefs(this@PushStreamService)
+            combine(
+                PushStreamState.status,
+                PushStreamState.snapshot,
+                prefs.ongoingMode,
+                prefs.ongoingTemplate,
+            ) { status, snapshot, mode, template -> OngoingNotice.build(mode, template, status, snapshot) }
+                .collect(::updateForeground)
         }
     }
 
@@ -215,6 +247,7 @@ class PushStreamService : Service() {
         }
         scope.cancel()
         PushStreamState.set(PushStreamStatus.Off)
+        PushStreamState.setSnapshot(null)
         super.onDestroy()
     }
 
@@ -301,6 +334,7 @@ class PushStreamService : Service() {
         val api = apiFactory.forIdentity(origin, identity)
         val key = PushStreamPrefs.cursorKey(origin, identity.username)
         var cursor = prefs.cursor(key)
+        PushStreamState.setSnapshot(null)
         val outer = this
         val watcher = launch {
             // 切换 / 退出账号：断开，外层循环按新账号重连
@@ -324,6 +358,7 @@ class PushStreamService : Service() {
                         prefs.markHealthy()
                         PushStreamState.set(PushStreamStatus.Connected(System.currentTimeMillis()))
                     }
+                    is StreamSignal.Status -> PushStreamState.setSnapshot(signal.snapshot)
                     is StreamSignal.Notification -> {
                         val item = signal.item
                         if (item.id <= cursor) return@collect // 已经显示过（重连时的重复）
@@ -392,17 +427,12 @@ class PushStreamService : Service() {
     }
 
     // ------------------------------------------------------------------
-    // 前台通知：自己一个低重要性渠道，静音、不显示角标
+    // 前台通知：自己一个低重要性渠道，静音、不显示角标；内容见 OngoingNotice
     // ------------------------------------------------------------------
 
-    private fun textFor(status: PushStreamStatus): String = when (status) {
-        PushStreamStatus.Off, PushStreamStatus.Connecting -> "正在连接服务器…"
-        is PushStreamStatus.Connected -> "已连接，有新通知会立即提醒"
-        is PushStreamStatus.Retrying -> "暂时断开（${status.reason}），会自动重连"
-    }
-
     private fun enterForeground(): Boolean = runCatching {
-        val notification = buildForeground(textFor(PushStreamState.status.value))
+        val view = shown ?: OngoingNotice.build(OngoingMode.SMART, "", PushStreamState.status.value, null)
+        val notification = buildForeground(view)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             startForeground(FOREGROUND_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_REMOTE_MESSAGING)
         } else {
@@ -410,15 +440,15 @@ class PushStreamService : Service() {
         }
     }.onFailure { android.util.Log.w("McPushStream", "无法进入前台：${it.message}") }.isSuccess
 
-    private fun updateForeground(text: String) {
-        if (text == shownText || !running) return
-        shownText = text
+    private fun updateForeground(view: OngoingView) {
+        if (view == shown || !running) return
+        shown = view
         runCatching {
-            getSystemService(NotificationManager::class.java)?.notify(FOREGROUND_ID, buildForeground(text))
+            getSystemService(NotificationManager::class.java)?.notify(FOREGROUND_ID, buildForeground(view))
         }
     }
 
-    private fun buildForeground(text: String): Notification {
+    private fun buildForeground(view: OngoingView): Notification {
         val manager = getSystemService(NotificationManager::class.java)
         if (manager != null && manager.getNotificationChannel(CH_STREAM) == null) {
             manager.createNotificationChannel(
@@ -430,31 +460,51 @@ class PushStreamService : Service() {
                 },
             )
         }
-        val intent = Intent(this, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
-            putExtra("mc_route", "settings/NOTIFY")
-        }
-        val pending = PendingIntent.getActivity(
-            this,
-            FOREGROUND_ID,
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
-        return Notification.Builder(this, CH_STREAM)
-            .setSmallIcon(io.movieclaw.android.R.drawable.ic_mc_notify)
-            .setContentTitle("MovieClaw 正在接收通知")
-            .setContentText(text)
-            .setOngoing(true)
-            .setShowWhen(false)
-            .setOnlyAlertOnce(true)
-            .setCategory(Notification.CATEGORY_SERVICE)
-            .setContentIntent(pending)
-            .build()
+        return ongoingNotification(this, view).build()
     }
 
     companion object {
         const val CH_STREAM = "mc_stream"
         private const val FOREGROUND_ID = 0x4D43_5354 // "MCST"
+
+        /** 常驻通知（只用原生模板）：标题 / 正文、进度条、展开列表、「打开下载」 */
+        internal fun ongoingNotification(context: Context, view: OngoingView): Notification.Builder {
+            fun open(requestCode: Int, extra: Pair<String, String>) = PendingIntent.getActivity(
+                context,
+                requestCode,
+                Intent(context, MainActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                    putExtra(extra.first, extra.second)
+                },
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+            val downloads = open(FOREGROUND_ID + 1, "mc_tab" to Notifier.TAB_ACTIVITY)
+            val builder = Notification.Builder(context, CH_STREAM)
+                .setSmallIcon(io.movieclaw.android.R.drawable.ic_mc_notify)
+                .setContentTitle(view.title)
+                .setContentText(view.text)
+                .setOngoing(true)
+                .setShowWhen(false)
+                .setOnlyAlertOnce(true)
+                .setCategory(Notification.CATEGORY_SERVICE)
+                .setContentIntent(if (view.openDownloads) downloads else open(FOREGROUND_ID, "mc_route" to "settings/NOTIFY"))
+            if (view.progress != null) builder.setProgress(100, view.progress, view.indeterminate)
+            if (view.lines.isNotEmpty()) {
+                builder.setStyle(
+                    Notification.InboxStyle().setBigContentTitle(view.title).also { style -> view.lines.forEach(style::addLine) },
+                )
+            }
+            if (view.openDownloads) {
+                builder.addAction(
+                    Notification.Action.Builder(
+                        android.graphics.drawable.Icon.createWithResource(context, io.movieclaw.android.R.drawable.ic_mc_notify),
+                        "打开下载",
+                        downloads,
+                    ).build(),
+                )
+            }
+            return builder
+        }
 
         /** 本进程里服务是否在跑（保活任务据此决定要不要拉起） */
         @Volatile var running: Boolean = false
