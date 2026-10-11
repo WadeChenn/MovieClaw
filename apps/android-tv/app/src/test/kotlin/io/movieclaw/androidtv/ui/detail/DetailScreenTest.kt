@@ -17,9 +17,11 @@ import io.movieclaw.androidtv.ui.TV_QUALIFIERS
 import io.movieclaw.androidtv.ui.episodes
 import io.movieclaw.androidtv.ui.focusedText
 import io.movieclaw.androidtv.ui.press
+import io.movieclaw.androidtv.ui.savePreview
 import io.movieclaw.androidtv.ui.setTvContent
 import io.movieclaw.androidtv.ui.shell.LocalRouter
 import io.movieclaw.androidtv.ui.shell.Router
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
@@ -31,7 +33,8 @@ import org.robolectric.annotation.GraphicsMode
 import kotlin.math.abs
 
 /**
- * 剧集详情（175 集的长季，看到第 60 集）：往下滑到选集、往上回首屏要跟手。真的 ItemDetailScreen，假服务端只给条目与分集。
+ * 剧集详情（175 集的长季，看到第 60 集）：往下滑到选集要跟手，滑下来后集段页签（1–50、51–100…）能用遥控器选段、
+ * 在段上按确认打开「全部分集」挑一集。真的 ItemDetailScreen，假服务端只给条目与分集。
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(application = Application::class, sdk = [34], qualifiers = TV_QUALIFIERS)
@@ -80,5 +83,30 @@ class DetailScreenTest {
         rule.press(KeyEvent.KEYCODE_DPAD_UP, settleMs = 500)
         assertTrue("回到首屏：${rule.focusedText()}", rule.focusedText().orEmpty().contains("播放"))
         assertTrue("0.5 秒回到首屏：${rowTop()} vs $start", abs((rowTop() - start).value) < 2f)
+    }
+
+    @Test
+    fun rangeTabsPickASegmentThenAnEpisode() {
+        // 时钟手动走、每下按键之间只停 0.4 秒（遥控器的正常节奏）：页签要随下半截滑上来才显示、才接焦点，
+        // 原先滑得太慢，这时按上直接回了首屏，用户根本看不到分段
+        rule.mainClock.autoAdvance = false
+        rule.press(KeyEvent.KEYCODE_DPAD_DOWN)
+        assertEpisodeFocused(60)
+        // 横排往上是当前段（第 60 集在 51–100）
+        rule.press(KeyEvent.KEYCODE_DPAD_UP)
+        assertEquals("51–100", rule.focusedText())
+        rule.savePreview("detail-episode-ranges")
+        // 换段：横排跳到这一段的段首
+        rule.press(KeyEvent.KEYCODE_DPAD_RIGHT)
+        assertEquals("101–150", rule.focusedText())
+        rule.onNodeWithTag("ep:101", useUnmergedTree = true).assertExists()
+        // 段上按确认：全部分集，焦点在段首；往右一格、确认，回到横排的那一集
+        rule.press(KeyEvent.KEYCODE_DPAD_CENTER)
+        assertEquals("101", rule.focusedText())
+        rule.press(KeyEvent.KEYCODE_DPAD_RIGHT)
+        assertEquals("102", rule.focusedText())
+        rule.savePreview("detail-episode-panel")
+        rule.press(KeyEvent.KEYCODE_DPAD_CENTER)
+        assertEpisodeFocused(102)
     }
 }
