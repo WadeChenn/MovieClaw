@@ -11,7 +11,7 @@
  * （保存/测试时申请）。出于安全，不展示 Cookie 明文，仅展示条数。
  */
 
-import { api, ensureBackendPermission, type ExtensionSiteView } from '../../lib/api';
+import { api, hasBackendPermission, requestBackendPermission, type ExtensionSiteView } from '../../lib/api';
 import {
   type BackendConfig,
   isConfigured,
@@ -286,7 +286,9 @@ async function syncNow() {
   showAction('sync', '同步中…', true);
   setHint('正在同步到 MovieClaw…');
   try {
-    const granted = await ensureBackendPermission(config.backendUrl);
+    // 只检查不申请：这里可能跟在「授权本站」之后的若干 await 后面，已不算用户手势，
+    // Firefox 会拒绝 permissions.request；后端权限本就在保存设置时申请过
+    const granted = await hasBackendPermission(config.backendUrl);
     if (!granted) {
       setHint('未授权访问后端地址，无法同步。请到设置重新保存。', 'error');
       showAction('sync', '重新同步');
@@ -353,7 +355,8 @@ async function onSave() {
   $saveBtn.disabled = true;
   setSettingsStatus('正在连接…');
   try {
-    if (!(await ensureBackendPermission(form.backendUrl))) {
+    // 第一个异步操作就是申请权限（Firefox 只认用户手势里同步发起的 permissions.request）
+    if (!(await requestBackendPermission(form.backendUrl))) {
       setSettingsStatus('未授权访问该地址', 'error');
       return;
     }
