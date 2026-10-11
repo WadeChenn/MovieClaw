@@ -24,7 +24,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
@@ -55,6 +54,11 @@ class ShellChrome {
 }
 
 val LocalShellChrome = compositionLocalOf { ShellChrome() }
+
+/** 外壳记下的栈顶那页（只在回调里读，不参与界面刷新） */
+private class TopLayer {
+    var memory: io.movieclaw.androidtv.ui.components.LayerFocusMemory? = null
+}
 
 /** 这一页现在是否在屏幕上（页签根页在压栈期间仍然存活，但不可见） */
 val LocalPageVisible = compositionLocalOf { true }
@@ -126,9 +130,15 @@ fun MainShell(args: LaunchArgs) {
         sidebarOpen = true
     }
 
+    // 栈顶那页的焦点记忆：收起侧边栏、关掉播放器时焦点回到离开时那颗，没有记录再交给页面自己挑
+    val topLayer = remember { TopLayer() }
+    fun focusPage() {
+        if (topLayer.memory?.restore() != true) runCatching { pageFocus.requestFocus() }
+    }
+
     fun closeSidebar() {
         sidebarOpen = false
-        runCatching { pageFocus.requestFocus() }
+        focusPage()
     }
 
     LaunchedEffect(sidebarOpen) {
@@ -159,7 +169,6 @@ fun MainShell(args: LaunchArgs) {
                     .fillMaxSize()
                     .focusRequester(pageFocus)
                     .focusRestorer()
-                    .focusProperties { canFocus = !sidebarOpen }
                     // 页面最左边再按左：展开侧边栏。按键冒泡到这里说明页面里没人处理，先试着往左挪焦点，挪不动才展开
                     .onKeyEvent { event ->
                         if (event.type != KeyEventType.KeyDown || event.nativeKeyEvent.keyCode != android.view.KeyEvent.KEYCODE_DPAD_LEFT) {
@@ -179,6 +188,7 @@ fun MainShell(args: LaunchArgs) {
                     androidx.compose.runtime.key(key) {
                         val layerFocus = remember { FocusRequester() }
                         val memory = remember { io.movieclaw.androidtv.ui.components.LayerFocusMemory() }
+                        if (visible) androidx.compose.runtime.SideEffect { topLayer.memory = memory }
                         Box(
                             Modifier
                                 .fillMaxSize()
@@ -245,7 +255,7 @@ fun MainShell(args: LaunchArgs) {
             router.player?.let { request ->
                 PlayerScreen(request, onClose = {
                     router.closePlayer()
-                    runCatching { pageFocus.requestFocus() }
+                    focusPage()
                 })
             }
         }
