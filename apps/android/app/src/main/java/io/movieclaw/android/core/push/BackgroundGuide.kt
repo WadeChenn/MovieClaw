@@ -16,7 +16,10 @@ import androidx.core.net.toUri
  */
 object BackgroundGuide {
 
-    data class Step(val title: String, val detail: String)
+    /** 每一步旁边的按钮打开哪里；null = 只能手动操作 */
+    enum class Action { BATTERY_OPTIMIZATION, VENDOR_SETTINGS, APP_DETAILS }
+
+    data class Step(val title: String, val detail: String, val action: Action?)
 
     fun isVivo(): Boolean = Build.MANUFACTURER.lowercase() in setOf("vivo", "iqoo")
 
@@ -38,10 +41,10 @@ object BackgroundGuide {
             else -> "在电池设置里允许 MovieClaw 后台运行、不受限制"
         }
         return listOf(
-            Step("忽略电池优化", "点下面的按钮，在系统弹窗里选「允许」。不加白名单时，熄屏一段时间后系统会断掉连接，开机也拉不起来"),
-            Step("允许自启动", autostart),
-            Step("允许后台运行", battery),
-            Step("锁定在最近任务", "打开最近任务（多任务）界面，把 MovieClaw 的卡片下拉或长按选「锁定」，一键清理时就不会被清掉"),
+            Step("忽略电池优化", "在系统弹窗里选「允许」，熄屏后连接不会被断开", Action.BATTERY_OPTIMIZATION),
+            Step("允许自启动", autostart, Action.VENDOR_SETTINGS),
+            Step("允许后台运行", battery, Action.APP_DETAILS),
+            Step("锁定在最近任务", "打开多任务界面，下拉 MovieClaw 的卡片或长按选「锁定」，一键清理时不会被清掉", null),
         )
     }
 

@@ -18,11 +18,29 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Arrangement
+import io.movieclaw.android.core.designsystem.StatusDot
+import io.movieclaw.android.core.designsystem.Warn
+import io.movieclaw.android.core.designsystem.Danger
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Check
+import io.movieclaw.android.core.designsystem.AccentSoft
+import io.movieclaw.android.core.designsystem.AccentStrong
+import io.movieclaw.android.core.designsystem.FillCard
+import io.movieclaw.android.core.designsystem.LineSoft
+import io.movieclaw.android.core.designsystem.Ok
+import io.movieclaw.android.core.designsystem.TextPrimary
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -308,7 +326,7 @@ fun NotifySettingsScreen(
     }
 
     if (state.showGuide) {
-        BackgroundGuideDialog(onDismiss = vm::dismissGuide)
+        BackgroundGuideSheet(onDismiss = vm::dismissGuide)
     }
 }
 
@@ -322,44 +340,72 @@ private fun StreamSection(
     val status by vm.streamStatus.collectAsState()
     NotifyRow(
         title = "实时通知（保持连接）",
-        subtitle = "一直连着你的 MovieClaw 服务器，入库、下载、系统提醒即时送达，不经过谷歌或手机厂商的推送。" +
-            "需要常驻一条静音通知，会多用一点电；断网后自动重连，期间的通知连上后补发。",
+        subtitle = "直连你的 MovieClaw 服务器，入库、下载等通知即时送达，不经过谷歌或厂商推送。" +
+            "会常驻一条静音通知；断网重连后补发错过的通知。",
         checked = state.stream,
         onChange = { if (!state.streamBusy) onEnable(it) },
     )
     if (state.stream) {
         val (dot, text) = when (val s = status) {
-            is PushStreamStatus.Connected -> Accent to "已连接"
-            PushStreamStatus.Connecting -> TextMuted to "正在连接…"
-            is PushStreamStatus.Retrying -> TextMuted to "未连接：${s.reason}，会自动重试"
-            PushStreamStatus.Off -> TextMuted to "未运行（可能被系统清理了，按下方引导放行后台运行）"
+            is PushStreamStatus.Connected -> Ok to "已连接"
+            PushStreamStatus.Connecting -> Warn to "正在连接…"
+            is PushStreamStatus.Retrying -> Warn to "未连接：${s.reason}，会自动重试"
+            PushStreamStatus.Off -> Danger to "未运行，可能被系统清理了，请检查后台运行设置"
         }
-        Text(
-            text,
-            style = McType.caption,
-            color = dot,
-            modifier = Modifier.padding(horizontal = 6.dp, vertical = 6.dp),
-        )
-        Row(Modifier.fillMaxWidth()) {
-            TextButton(onClick = vm::sendTest, enabled = !state.testing) {
-                Text(if (state.testing) "发送中…" else "发送测试通知", color = Accent)
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(vertical = 4.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(FillCard)
+                .border(1.dp, LineSoft, RoundedCornerShape(12.dp))
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                StatusDot(dot)
+                Spacer(Modifier.width(8.dp))
+                Text(text, style = McType.caption, color = TextPrimary)
             }
-            TextButton(onClick = vm::openGuide) { Text("后台运行设置", color = Accent) }
+            state.streamMessage?.let {
+                Spacer(Modifier.height(6.dp))
+                Text(it, style = McType.caption, color = TextMuted)
+            }
+            Spacer(Modifier.height(12.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                PillButton(if (state.testing) "发送中…" else "发送测试通知", enabled = !state.testing, onClick = vm::sendTest)
+                PillButton("后台运行设置", onClick = vm::openGuide)
+            }
+        }
+    } else {
+        state.streamMessage?.let {
+            Text(
+                it,
+                style = McType.caption,
+                color = TextMuted,
+                modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
+            )
         }
     }
-    state.streamMessage?.let {
-        Text(
-            it,
-            style = McType.caption,
-            color = TextMuted,
-            modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
-        )
+}
+
+@Composable
+private fun PillButton(text: String, enabled: Boolean = true, onClick: () -> Unit) {
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .clip(CircleShape)
+            .background(AccentSoft)
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 8.dp),
+    ) {
+        Text(text, style = McType.captionSemibold, color = if (enabled) AccentStrong else TextMuted)
     }
 }
 
 /** 后台运行引导：国产系统要手动放行，否则熄屏后连接会被断开 */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun BackgroundGuideDialog(onDismiss: () -> Unit) {
+private fun BackgroundGuideSheet(onDismiss: () -> Unit) {
     val context = LocalContext.current
     var ignoring by remember { mutableStateOf(BackgroundGuide.ignoringBatteryOptimizations(context)) }
     // 从系统弹窗 / 设置页回来时刷新「已允许」
@@ -367,45 +413,118 @@ private fun BackgroundGuideDialog(onDismiss: () -> Unit) {
         ignoring = BackgroundGuide.ignoringBatteryOptimizations(context)
         onPauseOrDispose { }
     }
-    AlertDialog(
+    ModalBottomSheet(
         onDismissRequest = onDismiss,
-        title = { Text("让通知保持连接") },
-        text = {
-            Column(Modifier.verticalScroll(rememberScrollState())) {
-                Text(
-                    if (BackgroundGuide.isVivo()) "vivo / iQOO 默认会清理后台应用，请依次放行下面几项：" else "很多手机默认会清理后台应用，请依次放行下面几项：",
-                    style = McType.caption,
-                    color = TextMuted,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = GuideSheetSurface,
+        contentColor = TextPrimary,
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(start = 20.dp, end = 20.dp, bottom = 24.dp),
+        ) {
+            Text("保持通知在线", style = McType.title3)
+            Spacer(Modifier.height(6.dp))
+            Text(
+                (if (BackgroundGuide.isVivo()) "vivo / iQOO" else "很多手机") + "会清理后台应用。放行下面几项，熄屏后也能及时收到通知。",
+                style = McType.caption,
+                color = TextMuted,
+            )
+            Spacer(Modifier.height(16.dp))
+            BackgroundGuide.steps().forEachIndexed { index, step ->
+                val done = step.action == BackgroundGuide.Action.BATTERY_OPTIMIZATION && ignoring
+                GuideStepCard(
+                    number = index + 1,
+                    step = step,
+                    done = done,
+                    onAction = {
+                        when (step.action) {
+                            BackgroundGuide.Action.BATTERY_OPTIMIZATION -> BackgroundGuide.requestIgnoreBatteryOptimizations(context)
+                            BackgroundGuide.Action.VENDOR_SETTINGS -> BackgroundGuide.openVendorBackgroundSettings(context)
+                            BackgroundGuide.Action.APP_DETAILS -> BackgroundGuide.openAppDetails(context)
+                            null -> Unit
+                        }
+                    },
                 )
-                BackgroundGuide.steps().forEachIndexed { index, step ->
-                    Spacer(Modifier.height(8.dp))
-                    Text("${index + 1}. ${step.title}", style = McType.subheadline)
-                    Text(
-                        if (index == 0 && ignoring) "已允许" else step.detail,
-                        style = McType.caption,
-                        color = TextFaint,
-                    )
-                }
+                Spacer(Modifier.height(10.dp))
             }
-        },
-        confirmButton = {
-            Column {
-                if (!ignoring) {
-                    TextButton(onClick = {
-                        BackgroundGuide.requestIgnoreBatteryOptimizations(context)
-                        ignoring = BackgroundGuide.ignoringBatteryOptimizations(context)
-                    }) { Text("忽略电池优化", color = Accent) }
-                }
-                TextButton(onClick = { BackgroundGuide.openVendorBackgroundSettings(context) }) {
-                    Text("打开自启动 / 后台设置", color = Accent)
-                }
-                TextButton(onClick = { BackgroundGuide.openAppDetails(context) }) {
-                    Text("打开应用详情", color = Accent)
-                }
-                TextButton(onClick = onDismiss) { Text("完成") }
+            Spacer(Modifier.height(10.dp))
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(AccentStrong)
+                    .clickable(onClick = onDismiss),
+            ) {
+                Text("好了", style = McType.bodySemibold, color = Color.Black)
             }
-        },
-    )
+        }
+    }
+}
+
+private val GuideSheetSurface = Color(0xFF15161A)
+
+@Composable
+private fun GuideStepCard(
+    number: Int,
+    step: BackgroundGuide.Step,
+    done: Boolean,
+    onAction: () -> Unit,
+) {
+    Row(
+        verticalAlignment = Alignment.Top,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(FillCard)
+            .border(1.dp, LineSoft, RoundedCornerShape(14.dp))
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+    ) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+                .padding(top = 1.dp)
+                .size(24.dp)
+                .background(if (done) Ok.copy(alpha = 0.18f) else AccentSoft, CircleShape),
+        ) {
+            if (done) {
+                Icon(Icons.Rounded.Check, contentDescription = "已完成", tint = Ok, modifier = Modifier.size(15.dp))
+            } else {
+                Text("$number", style = McType.captionSemibold, color = AccentStrong)
+            }
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(step.title, style = McType.bodySemibold, color = if (done) TextMuted else TextPrimary)
+            Spacer(Modifier.height(3.dp))
+            Text(
+                if (done) "已允许" else step.detail,
+                style = McType.caption,
+                color = if (done) Ok else TextMuted,
+            )
+        }
+        if (step.action != null && !done) {
+            Spacer(Modifier.width(10.dp))
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .clip(CircleShape)
+                    .background(AccentSoft)
+                    .clickable(onClick = onAction)
+                    .padding(horizontal = 14.dp, vertical = 7.dp),
+            ) {
+                Text(
+                    if (step.action == BackgroundGuide.Action.BATTERY_OPTIMIZATION) "允许" else "去设置",
+                    style = McType.captionSemibold,
+                    color = AccentStrong,
+                )
+            }
+        }
+    }
 }
 
 @Composable
