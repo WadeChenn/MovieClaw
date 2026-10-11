@@ -63,6 +63,8 @@ import io.movieclaw.android.core.designsystem.Accent
 import io.movieclaw.android.core.designsystem.McType
 import io.movieclaw.android.core.designsystem.TextFaint
 import io.movieclaw.android.core.designsystem.TextMuted
+import io.movieclaw.android.core.model.PushEventPref
+import io.movieclaw.android.core.model.PushPreferencesBody
 import io.movieclaw.android.core.model.PushRegistrationBody
 import io.movieclaw.android.core.network.ApiFactory
 import io.movieclaw.android.core.network.dataOrThrow
@@ -109,6 +111,9 @@ data class NotifySettingsState(
     val streamMessage: String? = null,
     /** 刚开启：弹出后台运行引导 */
     val showGuide: Boolean = false,
+    /** 服务器推送哪些事（账号级，与 iOS、网页共用）；null = 还没取到 */
+    val events: List<PushEventPref>? = null,
+    val eventsError: String? = null,
 )
 
 @HiltViewModel
@@ -138,6 +143,34 @@ class NotifySettingsViewModel @Inject constructor(
             // 已开启却没排程（重装 / 清数据 / 系统撤销）时补上
             if (s.enabled) NotifyScheduler.schedule(app)
             PushStreamController.startIfEnabled(app)
+            if (_ui.value.stream) loadEvents()
+        }
+    }
+
+    /** 读服务器上这个账号的推送偏好（实时通知按它筛，与 iOS 一致） */
+    fun loadEvents() {
+        viewModelScope.launch {
+            val api = api() ?: return@launch
+            runCatching { api.pushMe().dataOrThrow() }.fold(
+                onSuccess = { _ui.value = _ui.value.copy(events = it.events, eventsError = null) },
+                onFailure = { _ui.value = _ui.value.copy(eventsError = serverMessage(it)) },
+            )
+        }
+    }
+
+    /** 改一项：界面先变，服务器失败再改回去 */
+    fun setEvent(key: String, on: Boolean) {
+        val before = _ui.value.events ?: return
+        _ui.value = _ui.value.copy(
+            events = before.map { if (it.key == key) it.copy(enabled = on) else it },
+            eventsError = null,
+        )
+        viewModelScope.launch {
+            val api = api() ?: return@launch
+            runCatching { api.pushPreferences(PushPreferencesBody(mapOf(key to on))).dataOrThrow() }.fold(
+                onSuccess = { _ui.value = _ui.value.copy(events = it.events) },
+                onFailure = { _ui.value = _ui.value.copy(events = before, eventsError = serverMessage(it)) },
+            )
         }
     }
 
@@ -177,6 +210,7 @@ class NotifySettingsViewModel @Inject constructor(
                 PushStreamKeepAlive.schedule(app)
                 PushStreamController.start(app)
                 _ui.value = _ui.value.copy(streamBusy = false, stream = true, showGuide = true)
+                loadEvents()
             } else {
                 streamPrefs.setEnabled(false)
                 PushStreamKeepAlive.cancel(app)
@@ -273,7 +307,8 @@ fun NotifySettingsScreen(
             Spacer(Modifier.height(6.dp))
             NotifyRow(
                 title = "开启通知",
-                subtitle = "在本机检查下载、入库与今日更新，有变化时提醒",
+                subtitle = if (state.stream) "实时连接断开较久时，在本机定时检查兜底提醒"
+                else "在本机检查下载、入库与今日更新，有变化时提醒",
                 checked = state.enabled,
                 onChange = { on ->
                     if (on && Build.VERSION.SDK_INT >= 33 &&
@@ -285,7 +320,8 @@ fun NotifySettingsScreen(
                     }
                 },
             )
-            if (state.enabled) {
+            // 开着实时通知时推什么由服务器偏好决定（见下方「推送哪些事」），本机分类开关只在兜底时用，收起免得混淆
+            if (state.enabled && !state.stream) {
                 NotifyRow(
                     title = "下载",
                     subtitle = "下载完成或失败时",
@@ -376,6 +412,7 @@ private fun StreamSection(
                 PillButton("后台运行设置", onClick = vm::openGuide)
             }
         }
+        EventPrefsSection(state = state, onToggle = vm::setEvent)
     } else {
         state.streamMessage?.let {
             Text(
@@ -383,6 +420,47 @@ private fun StreamSection(
                 style = McType.caption,
                 color = TextMuted,
                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
+            )
+        }
+    }
+}
+
+/** 推送哪些事：服务器上按账号存的偏好，iOS、网页改了这里也一样 */
+@Composable
+private fun EventPrefsSection(state: NotifySettingsState, onToggle: (String, Boolean) -> Unit) {
+    val events = state.events
+    Spacer(Modifier.height(18.dp))
+    Text("推送哪些事", style = McType.subheadlineSemibold, modifier = Modifier.padding(horizontal = 6.dp))
+    Text(
+        "按账号保存，与 iOS、网页共用同一份设置",
+        style = McType.caption,
+        color = TextMuted,
+        modifier = Modifier.padding(start = 6.dp, end = 6.dp, top = 2.dp, bottom = 6.dp),
+    )
+    state.eventsError?.let {
+        Text(it, style = McType.caption, color = Danger, modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp))
+    }
+    if (events == null) {
+        if (state.eventsError == null) {
+            Text("正在读取…", style = McType.caption, color = TextFaint, modifier = Modifier.padding(horizontal = 6.dp))
+        }
+        return
+    }
+    events.groupBy { it.group }.forEach { (group, items) ->
+        if (group.isNotBlank()) {
+            Text(
+                group,
+                style = McType.caption,
+                color = TextFaint,
+                modifier = Modifier.padding(start = 6.dp, end = 6.dp, top = 10.dp, bottom = 2.dp),
+            )
+        }
+        items.forEach { event ->
+            NotifyRow(
+                title = event.title,
+                subtitle = event.description,
+                checked = event.enabled,
+                onChange = { onToggle(event.key, it) },
             )
         }
     }

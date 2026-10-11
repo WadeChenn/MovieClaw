@@ -43,3 +43,21 @@ data class PushTestView(
     val sent: Int = 0,
     val results: List<PushTestResult> = emptyList(),
 )
+
+/** GET /push/me 里的一项事件偏好：按账号存，iOS、网页、Android 共用同一份 */
+@Serializable
+data class PushEventPref(
+    val key: String = "",
+    val title: String = "",
+    val description: String = "",
+    val group: String = "",
+    val enabled: Boolean = false,
+)
+
+/** GET /push/me（只取这里用得到的字段） */
+@Serializable
+data class MyPushView(val events: List<PushEventPref> = emptyList())
+
+/** PUT /push/me/preferences：只改事件开关，不带 library_ids（不传 = 不改） */
+@Serializable
+data class PushPreferencesBody(val events: Map<String, Boolean>)

@@ -1152,4 +1152,12 @@ interface McApi {
 
     @POST("push/me/test")
     suspend fun pushTest(): McEnvelope<io.movieclaw.android.core.model.PushTestView>
+
+    @GET("push/me")
+    suspend fun pushMe(): McEnvelope<io.movieclaw.android.core.model.MyPushView>
+
+    @PUT("push/me/preferences")
+    suspend fun pushPreferences(
+        @Body body: io.movieclaw.android.core.model.PushPreferencesBody,
+    ): McEnvelope<io.movieclaw.android.core.model.MyPushView>
 }
