@@ -142,11 +142,19 @@ object OngoingNotice {
     private fun name(item: StreamStatusSnapshot.Item): String =
         listOf(item.title, item.episode).filter { it.isNotBlank() }.joinToString(" ")
 
+    /** 剩余时间：一天以内按分钟，再长按天（「805 小时」没法读），超过 30 天就不报了 */
+    internal fun etaText(seconds: Long): String? = when {
+        seconds <= 0 -> null
+        seconds < 86_400 -> McFormat.durationMinutes(maxOf(1, (seconds / 60).toInt()))
+        seconds <= 30 * 86_400L -> "约 ${(seconds + 43_200) / 86_400} 天"
+        else -> null
+    }
+
     /** 「78% · 2 分钟」；没在下载的说状态 */
     private fun detail(item: StreamStatusSnapshot.Item): String = when (item.state) {
         "downloading" -> {
             val percent = item.progress?.let { "${(it * 100).toInt()}%" }
-            val eta = item.eta?.takeIf { it > 0 }?.let { McFormat.durationMinutes(maxOf(1, (it / 60).toInt())) }
+            val eta = item.eta?.let(::etaText)
             listOfNotNull(percent, eta).joinToString(" · ").ifEmpty { "下载中" }
         }
         "stalled" -> "等待做种"

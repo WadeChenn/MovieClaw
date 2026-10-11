@@ -487,6 +487,8 @@ class PushStreamService : Service() {
                 .setShowWhen(false)
                 .setOnlyAlertOnce(true)
                 .setCategory(Notification.CATEGORY_SERVICE)
+                // 自己单独一组：不给系统和其他通知自动合并，否则要点两次才展开、按钮也被收起
+                .setGroup("mc_stream_ongoing")
                 .setContentIntent(if (view.openDownloads) downloads else open(FOREGROUND_ID, "mc_route" to "settings/NOTIFY"))
             if (view.progress != null) builder.setProgress(100, view.progress, view.indeterminate)
             if (view.lines.isNotEmpty()) {

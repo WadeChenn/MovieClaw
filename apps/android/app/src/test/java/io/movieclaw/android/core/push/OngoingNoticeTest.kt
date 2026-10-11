@@ -102,4 +102,12 @@ class OngoingNoticeTest {
         assertEquals(OngoingMode.SMART, OngoingMode.of(null))
         assertEquals(OngoingMode.SMART, OngoingMode.of("today"))
     }
+
+    @Test fun `long etas read in days and absurd ones are dropped`() {
+        assertEquals(null, OngoingNotice.etaText(0))
+        assertEquals("约 2 天", OngoingNotice.etaText(2L * 86_400 + 600))
+        assertEquals("约 30 天", OngoingNotice.etaText(30L * 86_400))
+        assertEquals(null, OngoingNotice.etaText(4_144_224)) // 真实快照：约 48 天
+        assertTrue(OngoingNotice.etaText(120)!!.isNotBlank())
+    }
 }
