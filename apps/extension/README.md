@@ -27,7 +27,8 @@ Cookie（含 httpOnly 会话 Cookie），用于主程序的站点模拟访问。
 pnpm ext:dev      # 启动开发模式，自动打开带扩展的 Chrome
 pnpm ext:build    # 生产构建，产物在 apps/extension/.output/chrome-mv3
 pnpm ext:zip      # 打包成可上传应用商店的 zip
-pnpm ext:publish  # 打 zip 并发布到 apps/web/public/extension/（Web 后台的下载按钮指向这里）
+pnpm ext:zip:firefox  # Firefox 专用包（MV3 + gecko.id + background.scripts）
+pnpm ext:publish  # Chrome / Firefox 两份 zip 都发布到 apps/web/public/extension/（Web 后台的下载按钮指向这里）
 ```
 
 改动扩展代码后记得跑 `pnpm ext:publish` 并提交生成的 zip——它随前端一起构建 /
@@ -38,6 +39,18 @@ pnpm ext:publish  # 打 zip 并发布到 apps/web/public/extension/（Web 后台
 1. 运行 `pnpm ext:build` 得到 `apps/extension/.output/chrome-mv3` 目录。
 2. Chrome 打开 `chrome://extensions`，右上角开启「开发者模式」。
 3. 点「加载已解压的扩展程序」，选择上述 `chrome-mv3` 目录。
+
+## Firefox
+
+Chrome 包不能装进 Firefox（会提示「附加组件已损坏」）：它没有 Firefox MV3 必需的
+`browser_specific_settings.gecko.id`，后台也是 Firefox 不支持的 `service_worker`。
+请使用 `pnpm ext:zip:firefox` 产出的 `*-firefox.zip`（后台下载名 `movieclaw-extension-firefox.zip`）：
+
+- 正式版 Firefox：`about:debugging` →「此 Firefox」→「临时载入附加组件」选择该 zip；重启后失效。
+- 开发者版 / Nightly / ESR：`about:config` 设 `xpinstall.signatures.required=false`，
+  再在附加组件管理器「从文件安装附加组件」，可长期使用。
+- 正式版长期安装需要 Mozilla 签名（AMO 自分发 / unlisted 签名，如 `web-ext sign --channel=unlisted`），
+  未签名包会提示「无法验证」。
 
 ## 交互设计（单弹窗，两视图）
 
