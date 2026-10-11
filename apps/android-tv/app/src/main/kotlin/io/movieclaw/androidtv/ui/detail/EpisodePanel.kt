@@ -53,6 +53,7 @@ import androidx.tv.material3.Surface
 import io.movieclaw.androidtv.core.model.generated.EpisodeView
 import io.movieclaw.androidtv.ui.components.McIcons
 import io.movieclaw.androidtv.ui.components.Text
+import io.movieclaw.androidtv.ui.stage.episodeTitle
 import io.movieclaw.androidtv.ui.theme.McColors
 import io.movieclaw.androidtv.ui.theme.McType
 import io.movieclaw.androidtv.ui.theme.pt
@@ -184,7 +185,7 @@ internal fun EpisodePanel(
             val current = focused
             if (current != null) {
                 Text(
-                    listOfNotNull("第 ${current.episodeNumber} 集", current.name).joinToString(" · "),
+                    listOfNotNull("第 ${current.episodeNumber} 集", episodeTitle(current.name)).joinToString(" · "),
                     style = McType.size(28, FontWeight.SemiBold),
                     maxLines = 1,
                 )

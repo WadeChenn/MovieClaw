@@ -51,6 +51,7 @@ import io.movieclaw.androidtv.ui.theme.McMetrics
 import io.movieclaw.androidtv.ui.theme.McType
 import io.movieclaw.androidtv.ui.theme.pt
 import io.movieclaw.androidtv.ui.components.layerFocus
+import io.movieclaw.androidtv.ui.stage.episodeTitle
 
 /** 系统按钮的高度（tvOS 默认按钮：两台模拟器截图量出约 76 点、字约 29 点，同首页大图区按钮） */
 private val ButtonHeight = 76.pt
@@ -158,8 +159,10 @@ internal fun EpisodeCard(
             }
         }
         Column(Modifier.width(width), verticalArrangement = Arrangement.spacedBy(6.pt)) {
-            Text("第 $number 集", style = McType.size(20, FontWeight.SemiBold), color = Color.White.copy(alpha = 0.6f))
-            Text(episode.name ?: "第 $number 集", style = McType.size(26, FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            // 有真名：小字集号 + 集名；没有（空或「第 N 集」占位）只写一次集号，小字那行留空保持各卡对齐
+            val title = episodeTitle(episode.name)
+            Text(if (title != null) "第 $number 集" else "", style = McType.size(20, FontWeight.SemiBold), color = Color.White.copy(alpha = 0.6f))
+            Text(title ?: "第 $number 集", style = McType.size(26, FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(
                 episode.overview.orEmpty(),
                 style = McType.size(22),

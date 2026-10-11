@@ -59,6 +59,7 @@ import io.movieclaw.androidtv.ui.components.Spinner
 import io.movieclaw.androidtv.ui.detail.DetailLogic
 import io.movieclaw.androidtv.ui.detail.EpisodePanel
 import io.movieclaw.androidtv.ui.detail.EpisodeRanges
+import io.movieclaw.androidtv.ui.stage.episodeTitle
 import io.movieclaw.androidtv.ui.theme.McColors
 import io.movieclaw.androidtv.ui.theme.McType
 import io.movieclaw.androidtv.ui.theme.pt
@@ -166,8 +167,8 @@ fun UpNextCard(episode: EpisodeView, countdown: Double?, onClick: () -> Unit, mo
                     color = McColors.Secondary,
                 )
                 Text("第 ${episode.episodeNumber} 集", style = McType.Headline)
-                val name = episode.name
-                if (!name.isNullOrEmpty()) {
+                val name = episodeTitle(episode.name)
+                if (name != null) {
                     Text(name, style = McType.Callout, color = McColors.Secondary, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
             }
