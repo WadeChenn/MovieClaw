@@ -55,6 +55,7 @@ from movieclaw_db.models.playback_state import PlaybackState
 from movieclaw_db.models.plugin_callback import PluginCallback
 from movieclaw_db.models.plugin_data import PluginData
 from movieclaw_db.models.push_download_watch import PushDownloadWatch
+from movieclaw_db.models.push_outbox import PushOutbox
 from movieclaw_db.models.push_preference import PushPreference
 from movieclaw_db.models.ratio_boost_stat import RatioBoostStat
 from movieclaw_db.models.ratio_boost_task import BoostTaskState, RatioBoostTask
@@ -157,6 +158,7 @@ __all__ = [
     "Person",
     "PlaybackLog",
     "PushDownloadWatch",
+    "PushOutbox",
     "PushPreference",
     "PlaybackMetric",
     "PlaybackState",

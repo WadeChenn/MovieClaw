@@ -8903,6 +8903,8 @@ nonisolated extension API {
         var clientVersion: String?
         /// 这个安装包签名里没有推送权限、拿不到 APNs 令牌（侧载包），重装商店版才能收到
         var unsupportedBuild: Bool?
+        /// 实时通知（保持连接，仅 Android）：true 开、false 关、不传不改
+        var stream: Bool?
 
         enum CodingKeys: String, CodingKey {
             case token
@@ -8914,6 +8916,7 @@ nonisolated extension API {
             case permission
             case clientVersion = "client_version"
             case unsupportedBuild = "unsupported_build"
+            case stream
         }
     }
 

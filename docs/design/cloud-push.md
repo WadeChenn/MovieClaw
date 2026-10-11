@@ -152,6 +152,26 @@ App 里：
 - 同一台手机（同一个 APNs 令牌）登了几个账号：只推一条，用最近登记过的那个账号的密钥。App 每天
   至少给手机上的每个账号登记一次；比这台手机最新的登记旧了一周以上的账号，当它已经不在这台手机上，不推。
 
+### 4.1 自托管实时通知（Android，保持连接）
+
+不依赖苹果、谷歌或手机厂商推送，也不需要连 MovieClaw Cloud：Android App 在前台服务里一直连着
+这台服务器，服务器自己把通知送过去。
+
+- **登记**：`PUT /push/me/registration` 带 `{"permission": "...", "stream": true}`（不带令牌和密钥，
+  只有 `android` 设备能开）；`stream: false` 关掉并清空发件箱；不传 `stream` 不改（旧版 App）。
+  开了实时通知的设备在「我的设备」里显示「能收到」，计入 `ready_devices`，`instance_ready` 也为真。
+- **发件箱**：`notify.prepare` 走完同样的收件人、偏好、权限筛选后，给这类设备每台写一行
+  `push_outbox`（明文 JSON：`event`、`title`、`subtitle`、`body`、`deeplink`（即 `open`）、`thread`、
+  `category`、`collapse`（与中继同一个 `collapse_id`）、`priority`（打扰级别）、`server`、`account`、
+  `sent_at`）。每台设备最多留 200 条未送达的；已送达的、超过 7 天的在写入时清掉；外键级联，
+  注销设备时随行删除；`id` 用 AUTOINCREMENT，清理后也不回退。
+- **连接**：`GET /push/me/stream?since=<id>`（SSE，设备凭证；`Last-Event-ID` 同义，取较大的）。
+  先补发 `since` 之后未确认的，再实时送新的：`id: <发件箱 id>` + `event: notification` +
+  `data: <JSON，含 id>`。连上先发 `: connected`，空闲时每 25 秒一行 `: heartbeat`；
+  单条连接最长一小时，到点正常结束，App 带游标重连。没开实时通知的设备 409，网页 / iOS 404。
+- **确认**：App 显示后 `POST /push/me/ack {"up_to": <id>}`，标记送达，之后重连不再补发。
+- **测试通知**：`POST /push/me/test` 同样写发件箱；手机连着时结果 `ok`，没连着 `queued`（连上补发）。
+
 ## 5. 事件、推送对象与偏好
 
 | 事件键 | 名称 | 推给谁 | 默认 | 跳转 |

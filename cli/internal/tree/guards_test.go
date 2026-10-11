@@ -204,6 +204,9 @@ var knownNonGenerated = []string{
 	"push.me.muted.remove",
 	"push.me.registration.set",
 	"push.me.registration.delete",
+	// Android 实时通知的长连接与送达确认：只给 App 的前台服务用
+	"push.me.stream",
+	"push.me.ack",
 	"push.images.get",
 	// 使用提示（docs/design/tips.md）：各端界面内部的提示状态，CLI 无消费方
 	"tips.state.show",
