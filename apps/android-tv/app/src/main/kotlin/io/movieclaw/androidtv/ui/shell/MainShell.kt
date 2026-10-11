@@ -26,7 +26,6 @@ import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusRestorer
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.input.key.KeyEventType
@@ -72,10 +71,9 @@ val LocalStagePreview = compositionLocalOf<io.movieclaw.androidtv.ui.stage.Stage
 /**
  * 主界面外壳（TVMainView）：
  * - 左侧可收起的侧边栏（账号 / 搜索 / 首页）。平时只有左上角一枚「‹ 当前页」胶囊；在页面最左边再按左、
- *   或在页签根页按返回，展开侧边栏并把焦点交给它。侧边栏里上下移动不换页，按确认才切过去；选当前页签退回根页。
+ *   展开侧边栏并把焦点交给它。侧边栏里上下移动不换页，按确认才切过去；选当前页签退回根页。
  * - 每个页签一个导航栈，各自记住浏览位置；二级页盖满整屏、不显示胶囊。
- * - 返回键：页面里有二级页就退一层；焦点在侧边栏时收起侧边栏、焦点还给页面；页签根页上第一次返回展开侧边栏、
- *   第二次退出 App。
+ * - 返回键：侧边栏开着先收起它、焦点还给页面（同选当前页签）；页面里有二级页就退一层；页签根页上退出 App。
  * - 播放器盖在整个界面之上，有自己的返回键处理。
  */
 @OptIn(ExperimentalComposeUiApi::class)
@@ -85,7 +83,6 @@ fun MainShell(args: LaunchArgs) {
     val chrome = remember { ShellChrome() }
     val activity = androidx.activity.compose.LocalActivity.current
     var sidebarOpen by remember { mutableStateOf(false) }
-    var focusInSidebar by remember { mutableStateOf(false) }
     val pageFocus = remember { FocusRequester() }
     val sidebarFocus = remember { FocusRequester() }
     val saveable = rememberSaveableStateHolder()
@@ -150,10 +147,9 @@ fun MainShell(args: LaunchArgs) {
 
     BackHandler(enabled = router.player == null) {
         when {
-            focusInSidebar && router.stack.isNotEmpty() -> closeSidebar()
-            focusInSidebar -> activity?.finish()
+            sidebarOpen -> closeSidebar()
             router.pop() -> Unit
-            else -> openSidebar()
+            else -> activity?.finish()
         }
     }
 
@@ -244,7 +240,6 @@ fun MainShell(args: LaunchArgs) {
                 Sidebar(
                     current = router.tab,
                     focusRequester = sidebarFocus,
-                    modifier = Modifier.onFocusChanged { focusInSidebar = it.hasFocus },
                     onSelect = {
                         router.select(it)
                         closeSidebar()

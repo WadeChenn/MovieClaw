@@ -13,6 +13,8 @@ import io.movieclaw.androidtv.ui.focusedText
 import io.movieclaw.androidtv.ui.press
 import io.movieclaw.androidtv.ui.setTvContent
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -85,10 +87,30 @@ class ShellFocusTest {
         assertEquals("返回", rule.focusedText())
         rule.press(KeyEvent.KEYCODE_DPAD_LEFT)
         assertEquals("首页", rule.focusedText())
+        back()
+        assertFalse(rule.activity.isFinishing)
+        assertEquals("返回", rule.focusedText())
+    }
+
+    private fun back() {
         rule.runOnUiThread { rule.activity.onBackPressedDispatcher.onBackPressed() }
         rule.mainClock.advanceTimeBy(400)
         rule.waitForIdle()
-        assertEquals("返回", rule.focusedText())
+    }
+
+    @Test
+    fun backOnOpenSidebarClosesItInsteadOfExiting() {
+        rule.press(KeyEvent.KEYCODE_DPAD_LEFT)
+        assertEquals("首页", rule.focusedText())
+        // 菜单开着按返回：收起、焦点回页面，不退出
+        back()
+        assertFalse(rule.activity.isFinishing)
+        assertEquals("继续播放", rule.focusedText())
+        rule.press(KeyEvent.KEYCODE_DPAD_RIGHT)
+        assertEquals("详情", rule.focusedText())
+        // 首页内容区（菜单收起）再按返回才退出
+        back()
+        assertTrue(rule.activity.isFinishing)
     }
 
     @Test
