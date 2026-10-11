@@ -416,7 +416,9 @@ internal fun liveDownloads(
     units: List<WantedView>,
     downloads: Map<String, SubscriptionDownloadView>,
 ): List<Pair<List<WantedView>, SubscriptionDownloadView>> =
-    units.filter { u -> u.infoHash?.let { downloads[it] } != null }
+    // 已入库的单元不算：大包按单集分批入库，入库后工单仍带着种子 hash，
+    // 算进来的话「E84–E102 · 19 集」会一直把已经能看的集也算成在下载
+    units.filter { u -> u.importedAt == null && u.infoHash?.let { downloads[it] } != null }
         .groupBy { it.infoHash!! }
         .map { (hash, group) -> group.sortedBy { it.episodeNumber } to downloads.getValue(hash) }
 

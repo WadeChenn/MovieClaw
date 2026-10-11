@@ -17,6 +17,15 @@ class DownloadGroupingTest {
         assertEquals(listOf("E84–E102 · 19 集", "E103", "E104"), rows.map { downloadUnitsLabel(it.first) })
     }
 
+    @Test fun episodesAlreadyImportedFromThePackDropOut() {
+        // 大包分批入库：E84–E89 已经单集入库，仍带着同一个种子 hash
+        val units = (84..102).map { ep ->
+            if (ep <= 89) unit(ep, "pack").copy(status = "imported", importedAt = "2026-10-11T03:30:00") else unit(ep, "pack")
+        }
+        val rows = liveDownloads(units, mapOf("pack" to dl("pack")))
+        assertEquals(listOf("E90–E102 · 13 集"), rows.map { downloadUnitsLabel(it.first) })
+    }
+
     @Test fun absurdEtaReadsAsSlow() {
         val note = downloadNote(SubscriptionDownloadView(infoHash = "x", state = "downloading", progress = 0.0, dlspeedBytes = 3, etaSeconds = 6_369_840))
         assertEquals(true, note.contains("速度很慢"))
