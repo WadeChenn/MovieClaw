@@ -7,6 +7,8 @@
 - **读**：连上时先补发游标之后、还没送达的，再实时送新的；每 25 秒一行心跳注释，
   防止反向代理、运营商 NAT 把空闲连接掐掉；
 - **确认**：App 显示后 ``POST /push/me/ack``，标记送达，之后重连不再补发；
+- **状态**：同一条连接上还发 ``event: status``（下载概况、今天入库，见 status.py），
+  不进发件箱、不要确认，供 App 的常驻通知显示；
 - **清理**：写入时顺手清掉已送达的、超过 7 天的，每台设备最多留 200 条未送达的。
 
 唤醒只在本进程内（asyncio.Event）；连接同时每几秒查一次库兜底，漏了唤醒也只是晚几秒。
@@ -26,6 +28,7 @@ from sqlalchemy import delete, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
+from movieclaw_api.services.push import status
 from movieclaw_db.engine import get_database
 from movieclaw_db.models import PushOutbox, utcnow
 
@@ -144,18 +147,26 @@ async def stream(
     *,
     since: int,
     is_disconnected: Callable[[], Awaitable[bool]],
+    viewer: status.Viewer,
 ) -> AsyncIterator[str]:
-    """一条实时连接：先补发 ``since`` 之后未送达的，再实时送新的，空闲时发心跳。"""
+    """一条实时连接：先发状态快照、补发 ``since`` 之后未送达的，再实时送新的，空闲时发心跳。"""
     event = asyncio.Event()
     _waiters.setdefault(device_id, set()).add(event)
     cursor = since
     started = time.monotonic()
     last_sent = started
+    throttle = status.Throttle()
     try:
         # 连上就先发一行注释：代理和 App 都能立刻确认连接已建立（不推进游标）
         yield ": connected\n\n"
+        first = True
         while True:
             event.clear()
+            frame = throttle.frame(await status.current(viewer, wait=first), time.monotonic())
+            first = False
+            if frame is not None:
+                yield frame
+                last_sent = time.monotonic()
             async with get_database().session() as session:
                 rows = await pending(session, device_id, after=cursor)
             for row in rows:

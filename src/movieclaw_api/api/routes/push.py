@@ -36,7 +36,7 @@ from movieclaw_api.schemas.cloud import (
 )
 from movieclaw_api.schemas.response import ApiResponse, ok
 from movieclaw_api.services.auth import Principal
-from movieclaw_api.services.push import admin, me, outbox, preferences
+from movieclaw_api.services.push import admin, me, outbox, preferences, status
 from movieclaw_api.services.push.images import resolve_image
 from movieclaw_db.engine import get_database, get_session
 
@@ -290,15 +290,21 @@ async def stream(
     """先补发 ``since`` 之后还没确认的，再实时送新的（``event: notification``，``id`` 是
     发件箱 id）；空闲时每 25 秒一行心跳注释。连接最长一小时，到点正常结束，App 带游标重连。
 
+    同一条连接上另发 ``event: status``（不带 id）：连上先发一帧，有变化再发，字段见
+    services/push/status.py。
+
     不挂 ``get_session``：连接要保持很久，不能一直占着数据库会话。
     """
     async with get_database().session() as session:
         device = await me.stream_device(session, principal)
+        viewer = await status.viewer_for(session, principal)
     cursor = since
     if last_event_id and last_event_id.isdigit():
         cursor = max(cursor, int(last_event_id))
     return StreamingResponse(
-        outbox.stream(device.id or 0, since=cursor, is_disconnected=request.is_disconnected),
+        outbox.stream(
+            device.id or 0, since=cursor, is_disconnected=request.is_disconnected, viewer=viewer
+        ),
         media_type="text/event-stream",
         # SSE 反缓冲三件套（原理见 routes/search.py 的流式端点）
         headers={

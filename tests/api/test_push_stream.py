@@ -417,3 +417,273 @@ def test_pruning_and_clear_on_disable(client: TestClient, monkeypatch) -> None: 
     resp = client.delete(f"{_AUTH}/devices/ld-{device_id}")
     assert resp.status_code == 200, resp.text
     assert _rows(client) == []
+
+
+# ----------------------------------------------------------------------
+# 状态快照（event: status，Android 常驻通知）
+# ----------------------------------------------------------------------
+
+
+def _task(
+    title: str,
+    state: str,
+    *,
+    progress: float,
+    size: int,
+    speed: int,
+    eta=None,
+    episodes=(),
+    source="subscription",
+) -> dict:  # type: ignore[no-untyped-def]
+    return {
+        "name": f"{title}.torrent",
+        "media_title": title,
+        "state": state,
+        "source": source,
+        "progress": progress,
+        "size_bytes": size,
+        "dlspeed_bytes": speed,
+        "eta_seconds": eta,
+        "subscriptions": [{"units": [{"season_number": 1, "episode_number": e} for e in episodes]}]
+        if episodes
+        else [],
+    }
+
+
+def _statuses(frames: list[dict]) -> list[dict]:
+    return [json.loads(f["data"]) for f in frames if f.get("event") == "status"]
+
+
+def _fake_downloads(monkeypatch, items: list[dict]) -> list[int]:  # type: ignore[no-untyped-def]
+    """下载器读数换成固定的；返回调用计数（读了几次下载器）。"""
+    from movieclaw_api.services import download_tasks
+
+    calls = [0]
+
+    async def snapshot(_session):  # type: ignore[no-untyped-def]
+        calls[0] += 1
+        return {"items": list(items), "sources": []}
+
+    monkeypatch.setattr(download_tasks, "download_task_snapshot", snapshot)
+    return calls
+
+
+def _seed_today(client: TestClient) -> None:
+    """两个库：全员可见的剧集库（今天入库 3 集、2 部），只给选定成员的库（今天 1 部电影）。"""
+    from datetime import timedelta as _td
+
+    from movieclaw_db.engine import get_database
+    from movieclaw_db.models import FileSource, LibraryFile, MediaItem, utcnow
+    from movieclaw_db.repositories.library_repo import LibraryRepository
+
+    async def go() -> None:
+        async with get_database().session() as session:
+            repo = LibraryRepository(session)
+            shows = await repo.create(name="剧集", kind="tv", root_paths=["/media/tv"])
+            private = await repo.create(name="私人", kind="movie", root_paths=["/media/private"])
+            private.access_mode = "selected"
+            items = [
+                MediaItem(kind="tv", tmdb_id=9100 + i, title=t, original_title=t, year=2024)
+                for i, t in enumerate(["遮天", "仙逆", "私藏电影"])
+            ]
+            session.add_all(items)
+            await session.commit()
+            for item in items:
+                await session.refresh(item)
+            zhetian, xianni, movie = items
+            rows = [
+                (shows.id, zhetian.id, 1, 135, utcnow()),
+                (shows.id, zhetian.id, 1, 136, utcnow()),
+                # 同一集的第二个版本：不重复算
+                (shows.id, zhetian.id, 1, 136, utcnow()),
+                (shows.id, xianni.id, 1, 160, utcnow()),
+                # 昨天以前的不算
+                (shows.id, xianni.id, 1, 159, utcnow() - _td(days=2)),
+                (private.id, movie.id, 0, 0, utcnow()),
+            ]
+            for n, (library_id, item_id, season, episode, created) in enumerate(rows):
+                session.add(
+                    LibraryFile(
+                        library_id=library_id,
+                        media_item_id=item_id,
+                        season_number=season,
+                        episode_number=episode,
+                        file_path=f"/media/x/{n}.mkv",
+                        size_bytes=1,
+                        source=FileSource.IMPORTED,
+                        created_at=created,
+                    )
+                )
+            await session.commit()
+
+    _call(client, go)
+
+
+def test_status_first_frame_visibility_and_shared_snapshot(client: TestClient, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    calls = _fake_downloads(
+        monkeypatch,
+        [
+            _task(
+                "遮天",
+                "downloading",
+                progress=0.41,
+                size=1000,
+                speed=2_000_000,
+                eta=540,
+                episodes=(135,),
+            ),
+            _task("仙逆", "stalled", progress=0.0, size=1000, speed=0, episodes=(160,)),
+            _task(
+                "牧神记",
+                "downloading",
+                progress=0.78,
+                size=2000,
+                speed=4_200_000,
+                eta=120,
+                episodes=(12, 13),
+            ),
+            # 刷流做种、已下完等入库的：不算进行中
+            _task("刷流", "downloading", progress=0.5, size=9000, speed=9_000_000, source="boost"),
+            _task("下完了", "completed", progress=1.0, size=1000, speed=0),
+        ],
+    )
+    _seed_today(client)
+    resp = client.post("/api/v1/members", json={**_MEMBER, "nickname": "家人"})
+    assert resp.status_code in (200, 201), resp.text
+    admin = _app_login(client, _ADMIN, installation="inst-admin", name="管理员的 vivo")
+    family = _app_login(client, _MEMBER, installation="inst-family", name="家人的 vivo")
+    _enable_stream(client, admin)
+    _enable_stream(client, family)
+    _notify(client, {0}, "补发的")
+    _wait(lambda: len(_rows(client)) == 1)
+
+    frames = _parse(_as_app(client, admin, "GET", _STREAM).text)
+    # 首帧：连上的注释之后先是状态，再补发通知；状态不带 id（不动通知游标）
+    assert frames[0] == {"comment": "connected"}
+    assert frames[1]["event"] == "status" and "id" not in frames[1]
+    assert frames[2]["event"] == "notification"
+    (mine,) = _statuses(frames)  # 内容没变：一小时连接里只发这一帧
+    assert mine["server"]
+    assert mine["today"] == {"imported": 4, "updated": 3}
+    assert mine["downloads"] == {
+        "active": 3,
+        "speed": 6_200_000,
+        "progress": round((0.41 * 1000 + 0.78 * 2000) / 4000, 3),
+        "items": [
+            {
+                "title": "牧神记",
+                "episode": "E12 等 2 集",
+                "progress": 0.78,
+                "eta": 120,
+                "state": "downloading",
+            },
+            {
+                "title": "遮天",
+                "episode": "E135",
+                "progress": 0.41,
+                "eta": 540,
+                "state": "downloading",
+            },
+            {"title": "仙逆", "episode": "E160", "progress": 0.0, "eta": None, "state": "stalled"},
+        ],
+    }
+
+    # 成员：看不到下载（同 dl.tasks 只给管理员），今天入库只数看得到的库
+    (theirs,) = _statuses(_parse(_as_app(client, family, "GET", _STREAM).text))
+    assert theirs["downloads"] is None
+    assert theirs["today"] == {"imported": 3, "updated": 2}
+
+    # 断线重连：新连接的首帧照样立刻有状态；快照共享，没有重新读下载器
+    again = _parse(_as_app(client, admin, "GET", _STREAM).text)
+    assert again[1]["event"] == "status" and _statuses(again) == [mine]
+    assert calls[0] == 1
+
+
+def test_status_pushes_count_changes_now_and_throttles_progress(
+    client: TestClient, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    from movieclaw_api.services.push import status
+
+    monkeypatch.setattr(status, "REFRESH_S", 0.05)
+    monkeypatch.setattr(status, "PROGRESS_EVERY_S", 60.0)
+    items = [_task("遮天", "downloading", progress=0.1, size=1000, speed=100, episodes=(135,))]
+    _fake_downloads(monkeypatch, items)
+    bearer = _app_login(client, _ADMIN, installation="inst-vivo-1", name="vivo")
+    _enable_stream(client, bearer)
+
+    def progress_only() -> None:
+        items[0] = _task("遮天", "downloading", progress=0.5, size=1000, speed=900, episodes=(135,))
+
+    def new_task() -> None:
+        items.append(_task("仙逆", "queued", progress=0.0, size=1000, speed=0, episodes=(160,)))
+
+    timers = [threading.Timer(0.3, progress_only), threading.Timer(0.8, new_task)]
+    for t in timers:
+        t.start()
+    frames = _parse(_as_app(client, bearer, "GET", _STREAM).text)
+    for t in timers:
+        t.join()
+    sent = _statuses(frames)
+    # 只变进度：60 秒内不再发；多了一个任务：立刻发（带上最新进度）
+    assert [s["downloads"]["active"] for s in sent] == [1, 2]
+    assert sent[1]["downloads"]["items"][0]["progress"] == 0.5
+
+
+def test_status_throttle_and_summary_units() -> None:
+    from movieclaw_api.services.push import status
+
+    def data(progress: float, active: int = 1) -> dict:
+        return {
+            "server": "NAS",
+            "today": {"imported": 0, "updated": 0},
+            "downloads": {
+                "active": active,
+                "speed": 1,
+                "progress": progress,
+                "items": [
+                    {
+                        "title": "遮天",
+                        "episode": "E1",
+                        "progress": progress,
+                        "eta": 1,
+                        "state": "downloading",
+                    }
+                ],
+            },
+        }
+
+    throttle = status.Throttle()
+    assert throttle.frame(None, 0) is None  # 还没有快照：不发假的
+    first = throttle.frame(data(0.1), 0)
+    assert first is not None and first.startswith("event: status\ndata: ")
+    assert throttle.frame(data(0.1), 1) is None  # 没变
+    assert throttle.frame(data(0.2), 29) is None  # 只变进度，没到 30 秒
+    assert throttle.frame(data(0.3), 31) is not None  # 到了
+    assert throttle.frame(data(0.3, active=2), 32) is not None  # 个数变了，立刻
+
+    empty = status.summarize([])
+    assert empty == {"active": 0, "speed": 0, "progress": None, "items": []}
+    # 电影 / 手动下载没有集号；排序：在下的在前，暂停的在后
+    summary = status.summarize(
+        [
+            {
+                "name": "x",
+                "media_title": None,
+                "state": "paused",
+                "progress": None,
+                "size_bytes": None,
+            },
+            {
+                "name": "奥本海默.mkv",
+                "media_title": "奥本海默",
+                "state": "downloading",
+                "progress": 0.2,
+                "size_bytes": None,
+            },
+        ]
+    )
+    assert [(i["title"], i["episode"], i["state"]) for i in summary["items"]] == [
+        ("奥本海默", "", "downloading"),
+        ("x", "", "paused"),
+    ]
+    assert summary["progress"] is None

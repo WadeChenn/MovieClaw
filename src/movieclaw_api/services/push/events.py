@@ -477,9 +477,10 @@ async def _send_alerts() -> None:
 def reset_state() -> None:
     """测试用：清掉内存里的推送状态（剧卡、冷却中的告警）。"""
     global _alert_flush
-    from movieclaw_api.services.push import hub
+    from movieclaw_api.services.push import hub, status
 
     hub.reset_state()
+    status.reset_state()
     _alert_pushed_at.clear()
     _alert_queue.clear()
     if _alert_flush is not None:
