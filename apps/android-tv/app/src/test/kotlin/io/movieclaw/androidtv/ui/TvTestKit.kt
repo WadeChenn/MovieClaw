@@ -33,12 +33,21 @@ const val TV_QUALIFIERS = "w960dp-h540dp-land-television-xhdpi"
 
 /** 假服务端：按路径给现成的对象，其余请求一律当断网 */
 class FakeTransport(private val routes: Map<String, Any>) : ApiTransport {
+    /** 收到过的请求路径（按先后） */
+    val requested = java.util.Collections.synchronizedList(mutableListOf<String>())
+
     @Suppress("UNCHECKED_CAST")
     override suspend fun <T> send(
         method: String, path: String, query: List<Pair<String, String>>, body: JsonElement?,
         response: KSerializer<T>, enveloped: Boolean,
-    ): T = (routes[path] ?: throw IOException("offline: $method $path")) as T
+    ): T {
+        requested += path
+        return (routes[path] ?: throw IOException("offline: $method $path")) as T
+    }
 }
+
+/** 摆好的电视界面：依赖图（开关设置用）与假服务端（看发了哪些请求） */
+class TvEnv(val graph: AppGraph, val transport: FakeTransport)
 
 fun episodes(count: Int, played: Int = 0, owned: (Long) -> Boolean = { true }) = (1..count.toLong()).map {
     EpisodeView(episodeNumber = it, name = "第 $it 集的标题", owned = owned(it), played = it <= played)
@@ -47,15 +56,17 @@ fun episodes(count: Int, played: Int = 0, owned: (Long) -> Boolean = { true }) =
 typealias TvRule = AndroidComposeTestRule<*, ComponentActivity>
 
 /** 摆上电视界面：主题、依赖图、已登录账号（接口走 [routes] 假服务端） */
-fun TvRule.setTvContent(routes: Map<String, Any>, content: @Composable () -> Unit) {
+fun TvRule.setTvContent(routes: Map<String, Any>, content: @Composable () -> Unit): TvEnv {
     val graph = AppGraph(activity.application)
     val server = ServerAddress("http://127.0.0.1:9".toHttpUrl())
-    val session = AccountSession(server, "token", SessionView(username = "u", nickname = "我"), McApi(FakeTransport(routes)))
+    val transport = FakeTransport(routes)
+    val session = AccountSession(server, "token", SessionView(username = "u", nickname = "我"), McApi(transport))
     setContent {
         McTheme {
             CompositionLocalProvider(LocalGraph provides graph, LocalSession provides session, LocalServer provides server, content = content)
         }
     }
+    return TvEnv(graph, transport)
 }
 
 /** 遥控器按一下（按下 + 抬起），走 Activity 的整条按键分发，同真机 */

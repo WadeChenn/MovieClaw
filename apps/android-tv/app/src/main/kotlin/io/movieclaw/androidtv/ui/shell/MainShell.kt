@@ -153,7 +153,8 @@ fun MainShell(args: LaunchArgs) {
         }
     }
 
-    CompositionLocalProvider(LocalRouter provides router, LocalShellChrome provides chrome, LocalStagePreview provides preview,
+    // 自动播放预告默认关：不提供预告控制器，首页 / 详情页只放静态剧照（开关在「谁在看」页）
+    CompositionLocalProvider(LocalRouter provides router, LocalShellChrome provides chrome, LocalStagePreview provides preview.takeIf { graph.autoPreview },
         LocalHomeStore provides homeStore,
         io.movieclaw.androidtv.ui.detail.LocalUpNextUnit provides upNextUnit,
     ) {
