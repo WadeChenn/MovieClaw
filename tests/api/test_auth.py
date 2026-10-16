@@ -351,7 +351,9 @@ def fill_path_params(path: str) -> str:
     设备授权的全路由扫描（tests/api/test_device_auth.py）也复用这一份。
     """
     return (
-        path.replace("{site_id}", "mteam")
+        # 客户端更新：不存在的客户端名（参数校验 422，不会真去 GitHub 查发布、下安装包）
+        path.replace("{product}", "x")
+        .replace("{site_id}", "mteam")
         .replace("{history_id}", "1")
         .replace("{backdrop_id}", "f" * 32)
         .replace("{attachment_id}", "f" * 32)

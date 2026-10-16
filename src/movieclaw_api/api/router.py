@@ -33,6 +33,7 @@ from movieclaw_api.api.routes.appearance import router as appearance_router
 from movieclaw_api.api.routes.auth import router as auth_router
 from movieclaw_api.api.routes.channels import router as channels_router
 from movieclaw_api.api.routes.channels_legacy import router as channels_legacy_router
+from movieclaw_api.api.routes.client_update import router as client_update_router
 from movieclaw_api.api.routes.cloud import router as cloud_router
 from movieclaw_api.api.routes.collections import router as collections_router
 from movieclaw_api.api.routes.discover import router as discover_router
@@ -143,6 +144,7 @@ _MEMBER_ROUTERS = [
     # 我的通知（docs/design/cloud-push.md §7.3）：每个人只管自己的开关和设备；
     # App 登记只接受 App 类设备自己的凭证（服务层判定）
     push_member_router,
+    client_update_router,
     # 使用提示（docs/design/tips.md）：每个人自己的事件计数与提示展示/作废记录
     tips_router,
     # 离线下载（docs/design/offline-download.md）：下载类接口另挂「下载影片到设备」开关；

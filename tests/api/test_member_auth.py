@@ -742,10 +742,14 @@ _MEMBER_ALLOWLIST = {
     ("DELETE", "/api/v1/offline/exports/{export_id}"),
     # 本机播放的观看记录：只写自己的观看状态与日志（同 /playback/progress）
     ("POST", "/api/v1/playback/viewings"),
+    # App 自身更新的服务器兜底：只读公开的发布信息、代下公开的安装包
+    ("GET", "/api/v1/app/clients/{product}/latest"),
+    ("GET", "/api/v1/app/clients/{product}/apk"),
 }
 
 # 路径参数哑值（与 test_auth.py 的匿名守护测试保持一致）
 _PATH_DUMMIES = {
+    "{product}": "x",  # 客户端更新：不存在的客户端名（422，不联网）
     "{letter_id}": "1",  # 可靠事件死信
     "{start_ms}": "0",  # 预切片段的起点
     "{task_key}": "library_reconcile",

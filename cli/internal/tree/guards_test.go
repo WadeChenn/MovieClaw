@@ -220,6 +220,9 @@ var knownNonGenerated = []string{
 	"push.me.stream",
 	"push.me.ack",
 	"push.images.get",
+	// Android 客户端自身更新：只给 App 查新版、经服务器下载 APK
+	"app.clients.latest",
+	"app.clients.apk",
 	// 使用提示（docs/design/tips.md）：各端界面内部的提示状态，CLI 无消费方
 	"tips.state.show",
 	"tips.state.reset",
