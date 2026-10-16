@@ -83,7 +83,7 @@ jobs:
         working-directory: apps/android-tv
         run: >-
           bash gradlew --stacktrace
-          :core:network:test :core:session:testDebugUnitTest :core:playback:testDebugUnitTest
+          :core:network:test :core:session:testDebugUnitTest :core:playback:testDebugUnitTest :core:update:testDebugUnitTest
           :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleRelease
       - uses: actions/upload-artifact@v4
         if: always()

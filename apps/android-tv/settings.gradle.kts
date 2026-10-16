@@ -17,6 +17,6 @@ dependencyResolutionManagement {
     }
 }
 rootProject.name = "MovieClawAndroidTV"
-include(":app", ":core:model", ":core:network", ":core:session", ":core:playback", ":core:ffmpeg")
+include(":app", ":core:model", ":core:network", ":core:session", ":core:playback", ":core:ffmpeg", ":core:update")
 // 播放引擎、接口与模型、FFmpeg 音频扩展与手机版共用，源码在 apps/android-core（iOS 的 Shared/ 同理）
-listOf("model", "network", "playback", "ffmpeg").forEach { project(":core:$it").projectDir = file("../android-core/$it") }
+listOf("model", "network", "playback", "ffmpeg", "update").forEach { project(":core:$it").projectDir = file("../android-core/$it") }

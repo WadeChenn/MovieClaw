@@ -101,6 +101,8 @@ class MoreViewModel @Inject constructor(
     private val apiFactory: ApiFactory,
     /** 底栏形态试用开关（液态玻璃新版 ⇄ 当前形态） */
     private val tabBarPrefs: io.movieclaw.android.core.session.TabBarPrefs,
+    /** 底部版本号那一行：点一下手动检查 App 更新 */
+    val appUpdate: io.movieclaw.android.feature.update.AppUpdateController,
 ) : ViewModel() {
     val ui = repository.ui
     val servers = repository.servers
@@ -459,10 +461,13 @@ fun MoreScreen(
             }
             item(key = "tail") {
                 Text(
-                    // 「版本（构建号）」：反馈问题时据此认出装的是哪一次构建（iOS 关于页同口径）
-                    "MovieClaw Android · ${BuildInfo.DISPLAY_VERSION}",
+                    // 「版本（构建号）」：反馈问题时据此认出装的是哪一次构建（iOS 关于页同口径）；点一下检查更新
+                    "MovieClaw Android · ${BuildInfo.DISPLAY_VERSION} · 检查更新",
                     style = McType.micro, color = TextFaint,
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 22.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(onClick = vm.appUpdate::checkNow)
+                        .padding(vertical = 22.dp),
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                 )
             }

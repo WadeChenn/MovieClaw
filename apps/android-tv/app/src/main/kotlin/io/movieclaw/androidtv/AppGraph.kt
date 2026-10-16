@@ -44,6 +44,9 @@ class AppGraph(app: Application) {
 
     val store = LocalStore(app)
 
+    /** App 自身更新（检查、经服务器下载、交给系统安装器） */
+    val appUpdate = io.movieclaw.androidtv.ui.update.TvAppUpdate(app, http, appScope)
+
     /** 「设置 → 设备名称」里用户起的名字（如「客厅电视」），Android 7.1 以下没有这一项 */
     val deviceName: String =
         (if (Build.VERSION.SDK_INT >= 25) Settings.Global.getString(app.contentResolver, Settings.Global.DEVICE_NAME) else null)

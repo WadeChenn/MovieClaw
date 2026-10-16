@@ -124,6 +124,7 @@ dependencies {
 
     // 播放：与 TV 共用的统一引擎（apps/android-core：Exo + FFmpeg 音频软解 + libass，失败走服务端流逐级降档）
     implementation(project(":core:playback"))
+    implementation(project(":core:update"))
     // FFmpeg 音频软解：Exo 按类名反射加载，只要在 APK 里
     implementation(project(":core:ffmpeg"))
     // 正片画面（ContentFrame）；刷片的画面槽仍是 PlayerView
