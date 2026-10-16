@@ -321,11 +321,21 @@ fun PlayerButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifie
 }
 
 /**
- * 控制层进度条上方的「下一集」「选集」（剧集才有，同手机端进度条上的工具行）：上键从画面把焦点交到这里（落在第一颗），
- * 左右换按钮、到头不出去，下键 [onLeave] 回到画面
+ * 控制层进度条上方的工具行：剧集有「下一集」「选集」（同手机端进度条上的工具行），任何片子都有「播放诊断」。
+ * 上键从画面把焦点交到这里（落在第一颗），左右换按钮、到头不出去，下键 [onLeave] 回到画面
  */
 @Composable
-fun EpisodeActions(next: EpisodeView?, onNext: () -> Unit, onEpisodes: () -> Unit, focus: FocusRequester, onLeave: () -> Unit, modifier: Modifier = Modifier) {
+fun EpisodeActions(
+    next: EpisodeView?,
+    onNext: () -> Unit,
+    onEpisodes: () -> Unit,
+    focus: FocusRequester,
+    onLeave: () -> Unit,
+    modifier: Modifier = Modifier,
+    episodic: Boolean = true,
+    diagnosticsOpen: Boolean = false,
+    onDiagnostics: () -> Unit = {},
+) {
     Row(
         modifier
             .focusRequester(focus)
@@ -343,8 +353,11 @@ fun EpisodeActions(next: EpisodeView?, onNext: () -> Unit, onEpisodes: () -> Uni
             .focusGroup(),
         horizontalArrangement = Arrangement.spacedBy(24.pt),
     ) {
-        if (next != null) ActionButton(McIcons.SkipForward, "下一集", onNext)
-        ActionButton(McIcons.Episodes, "选集", onEpisodes)
+        if (episodic) {
+            if (next != null) ActionButton(McIcons.SkipForward, "下一集", onNext)
+            ActionButton(McIcons.Episodes, "选集", onEpisodes)
+        }
+        ActionButton(McIcons.Info, if (diagnosticsOpen) "关闭诊断" else "播放诊断", onDiagnostics)
     }
 }
 

@@ -334,6 +334,14 @@ class McApi(private val transport: ApiTransport) {
         return transport.send("POST", "/playback/metrics", query, McJson.encodeToJsonElement(body), serializer<JsonObject>(), enveloped = true)
     }
 
+    /** 播放会话诊断（`GET /playback/sessions/{session_id}/diagnostics`） */
+    suspend fun playbackSessionDiagnostics(sessionId: String, token: String): PlaybackDiagnosticsView {
+        val query = buildList<Pair<String, String>> {
+            add("token" to token.toString())
+        }
+        return transport.send("GET", "/playback/sessions/${sessionId}/diagnostics", query, null, serializer<PlaybackDiagnosticsView>(), enveloped = true)
+    }
+
     /** 大图预告：一部片停留后原地播放的那一段（`GET /reels/preview/{media_item_id}`） */
     suspend fun reelsPreview(mediaItemId: Long, source: String? = null, season: Long? = null, episode: Long? = null, modes: String? = null): ReelItemView? {
         val query = buildList<Pair<String, String>> {
@@ -343,6 +351,14 @@ class McApi(private val transport: ApiTransport) {
             modes?.let { add("modes" to it.toString()) }
         }
         return transport.send("GET", "/reels/preview/${mediaItemId}", query, null, serializer<ReelItemView?>(), enveloped = true)
+    }
+
+    /** 客户端最新版本（`GET /app/clients/{product}/latest`） */
+    suspend fun appClientsLatest(product: String, refresh: Boolean? = null): ClientReleaseView {
+        val query = buildList<Pair<String, String>> {
+            refresh?.let { add("refresh" to it.toString()) }
+        }
+        return transport.send("GET", "/app/clients/${product}/latest", query, null, serializer<ClientReleaseView>(), enveloped = true)
     }
 
     /** 分享页开始播放（`POST /share/{slug}/playback/sessions`） */
@@ -381,5 +397,13 @@ class McApi(private val transport: ApiTransport) {
             add("season_number" to seasonNumber.toString())
         }
         return transport.send("GET", "/share/${slug}/playback/items/${mediaItemId}/episodes", query, null, serializer<SeasonEpisodesView>(), enveloped = true)
+    }
+
+    /** 分享页播放会话诊断（`GET /share/{slug}/playback/sessions/{session_id}/diagnostics`） */
+    suspend fun sharePlaybackSessionDiagnostics(sessionId: String, slug: String, token: String): PlaybackDiagnosticsView {
+        val query = buildList<Pair<String, String>> {
+            add("token" to token.toString())
+        }
+        return transport.send("GET", "/share/${slug}/playback/sessions/${sessionId}/diagnostics", query, null, serializer<PlaybackDiagnosticsView>(), enveloped = true)
     }
 }

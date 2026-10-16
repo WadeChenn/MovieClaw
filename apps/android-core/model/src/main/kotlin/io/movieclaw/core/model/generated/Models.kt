@@ -174,6 +174,52 @@ data class ClientCapabilityIn(
 )
 
 /**
+ * Android 手机 / 电视客户端的最新正式版（GitHub Release 附带的包信息 JSON）。
+ * App 拿 ``build`` 与自己的 versionCode 比较；下载走 ``/app/clients/{product}/apk``，
+ * 由服务器经「设置 → 网络」里的 GitHub 出口代取（电视、手机常常直连不了 GitHub）。
+ */
+@Serializable
+data class ClientReleaseView(
+    /**
+     * android / androidtv
+     */
+    @SerialName("product") val product: String = "",
+    /**
+     * versionName，如 0.4.0
+     */
+    @SerialName("version") val version: String = "",
+    /**
+     * versionCode：App 比这个数决定有没有新版
+     */
+    @SerialName("build") val build: Long = 0,
+    /**
+     * APK 字节数
+     */
+    @SerialName("size") val size: Long = 0,
+    /**
+     * APK 的 sha256（小写十六进制），下载完 App 自己核对
+     */
+    @SerialName("sha256") val sha256: String = "",
+    /**
+     * 签名证书指纹：与本机安装包不同时覆盖安装会失败
+     */
+    @SerialName("certificate_sha256") val certificateSha256: String? = null,
+    /**
+     * 最低 Android API 级别
+     */
+    @SerialName("minimum_sdk") val minimumSdk: Long? = null,
+    /**
+     * Release 正文（Markdown）
+     */
+    @SerialName("changelog") val changelog: String = "",
+    @SerialName("published_at") val publishedAt: String? = null,
+    /**
+     * GitHub Release 页面
+     */
+    @SerialName("release_url") val releaseUrl: String = "",
+)
+
+/**
  * 合集卡片的一张封面图。
  * 合集自己没有图，封面就是成员的海报。由服务端在列合集时一并给出——否则
  * 客户端要为每个合集再请求一次成员才画得出卡片，一屏合集就是一屏请求。
@@ -1663,6 +1709,19 @@ data class PersonView(
 )
 
 /**
+ * 远程 Worker 最近一次产物上传的脱敏记录。
+ */
+@Serializable
+data class PlaybackArtifactUploadView(
+    @SerialName("name") val name: String = "",
+    @SerialName("status") val status: Long = 0,
+    @SerialName("received_bytes") val receivedBytes: Long = 0,
+    @SerialName("content_length") val contentLength: Long? = null,
+    @SerialName("transfer_encoding") val transferEncoding: String? = null,
+    @SerialName("occurred_at_ms") val occurredAtMs: Long = 0,
+)
+
+/**
  * 主播放列表的一段剪辑：取流地址、在剪辑里播哪一截、入口点表。
  */
 @Serializable
@@ -1744,6 +1803,52 @@ data class PlaybackDecisionView(
     @SerialName("setting_key") val settingKey: String? = null,
     @SerialName("reason") val reason: String = "",
     @SerialName("suggestion") val suggestion: String? = null,
+)
+
+/**
+ * 播放器诊断面板使用的会话快照，不包含任何签名 URL 或令牌。
+ */
+@Serializable
+data class PlaybackDiagnosticsView(
+    @SerialName("session_state") val sessionState: String = "",
+    @SerialName("session_error") val sessionError: String? = null,
+    @SerialName("processing_mode") val processingMode: String = "",
+    @SerialName("execution_location") val executionLocation: String = "",
+    @SerialName("backend") val backend: String? = null,
+    @SerialName("encoder") val encoder: String? = null,
+    @SerialName("worker_id") val workerId: String? = null,
+    @SerialName("worker_version") val workerVersion: String? = null,
+    @SerialName("worker_platform") val workerPlatform: String? = null,
+    @SerialName("worker_arch") val workerArch: String? = null,
+    @SerialName("ffmpeg_version") val ffmpegVersion: String? = null,
+    @SerialName("worker_online") val workerOnline: Boolean? = null,
+    @SerialName("worker_last_seen_seconds") val workerLastSeenSeconds: Double? = null,
+    @SerialName("job_id") val jobId: String? = null,
+    @SerialName("attempt_id") val attemptId: String? = null,
+    @SerialName("job_state") val jobState: String? = null,
+    @SerialName("job_out_time_ms") val jobOutTimeMs: Long? = null,
+    @SerialName("job_speed") val jobSpeed: String? = null,
+    @SerialName("job_phase") val jobPhase: String? = null,
+    @SerialName("job_exit_code") val jobExitCode: Long? = null,
+    @SerialName("job_error") val jobError: String? = null,
+    @SerialName("job_stderr_tail") val jobStderrTail: String? = null,
+    @SerialName("head_segment") val headSegment: Long? = null,
+    @SerialName("highest_produced_segment") val highestProducedSegment: Long? = null,
+    @SerialName("requested_segment") val requestedSegment: Long? = null,
+    @SerialName("served_segment") val servedSegment: Long? = null,
+    @SerialName("segment_wait_ms") val segmentWaitMs: Long? = null,
+    @SerialName("segment_status") val segmentStatus: Long? = null,
+    @SerialName("pending_segments") val pendingSegments: List<Long> = emptyList(),
+    @SerialName("failed_segments") val failedSegments: List<Long> = emptyList(),
+    @SerialName("historical_failed_segments") val historicalFailedSegments: List<Long> = emptyList(),
+    @SerialName("recent_uploads") val recentUploads: List<PlaybackArtifactUploadView> = emptyList(),
+    @SerialName("cache_bytes") val cacheBytes: Long = 0,
+    @SerialName("total_segments") val totalSegments: Long? = null,
+    @SerialName("lead_seconds") val leadSeconds: Double? = null,
+    @SerialName("pause_reasons") val pauseReasons: List<String> = emptyList(),
+    @SerialName("cache_hit") val cacheHit: Boolean = false,
+    @SerialName("cached_segments") val cachedSegments: Long = 0,
+    @SerialName("timeline") val timeline: List<JsonObject> = emptyList(),
 )
 
 /**

@@ -91,8 +91,11 @@ ENDPOINTS = [
     "GET /playback/files/{file_id}/bluray",
     "POST /playback/client-log",
     "POST /playback/metrics",
+    "GET /playback/sessions/{session_id}/diagnostics",
     # 首页 / 详情大图区的预告片段
     "GET /reels/preview/{media_item_id}",
+    # App 自身更新（APK 走流式下载，不生成接口函数）
+    "GET /app/clients/{product}/latest",
     # 访客分享页的播放（手机打开分享链接；与成员播放同一套请求 / 响应）
     "POST /share/{slug}/playback/sessions",
     "POST /share/{slug}/playback/sessions/{session_id}/ping",
@@ -100,6 +103,7 @@ ENDPOINTS = [
     "POST /share/{slug}/playback/progress",
     "GET /share/{slug}/playback/items/{media_item_id}",
     "GET /share/{slug}/playback/items/{media_item_id}/episodes",
+    "GET /share/{slug}/playback/sessions/{session_id}/diagnostics",
 ]
 
 KOTLIN_KEYWORDS = {

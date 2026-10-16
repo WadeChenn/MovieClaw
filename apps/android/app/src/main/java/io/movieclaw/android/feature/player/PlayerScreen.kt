@@ -60,6 +60,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -312,6 +313,9 @@ private fun PlayingSurface(
     // 菜单跟着消失——表现就是"没动它自己突然隐藏了"（用户反馈）
     var menuOpen by remember { mutableStateOf(false) }
     var episodePickerOpen by remember(controller) { mutableStateOf(false) }
+    var diagnosticsOpen by remember(controller) { mutableStateOf(false) }
+    LaunchedEffect(controller, diagnosticsOpen) { controller.setDiagnosticsOpen(diagnosticsOpen) }
+    val diagnostics by controller.diagnostics.collectAsState()
 
     fun seekTo(targetMs: Long) {
         val clamped = if (durationMs > 0) targetMs.coerceIn(0L, durationMs) else targetMs.coerceAtLeast(0L)
@@ -645,6 +649,20 @@ private fun PlayingSurface(
             )
         }
 
+        // 播放诊断（iOS 同款，从「画质」菜单打开）：左上角，竖向不压住屏幕中线以下的播放键
+        diagnostics?.let { sections ->
+            BoxWithConstraints(Modifier.fillMaxSize()) {
+                PlayerDiagnosticsPanel(
+                    sections = sections,
+                    maxHeight = maxHeight * 0.62f,
+                    onClose = { diagnosticsOpen = false },
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(start = 16.dp, top = 72.dp),
+                )
+            }
+        }
+
         // ── 跳过片头/片尾（docs/design/skip-intro.md §5，判定在引擎 SkipSegments）──
         // 位置进区间（终点前 3s 前）出按钮，点了跳到区间尾；与「下一集」卡片不同时出现。不自动跳过（v1 拍板）。
         val skip = state.skipSegment
@@ -763,6 +781,8 @@ private fun PlayingSurface(
                         reason = decision?.reason.orEmpty(),
                         onSelect = controller::selectQuality,
                         onExpandedChange = { menuOpen = it },
+                        onDiagnostics = { diagnosticsOpen = !diagnosticsOpen },
+                        diagnosticsOpen = diagnosticsOpen,
                     )
                     IconButton(onClick = {
                         val aspect = if (state.videoWidth > 0 && state.videoHeight > 0) {
@@ -1240,6 +1260,9 @@ private fun QualityMenuButton(
     reason: String,
     onSelect: (Int?) -> Unit,
     onExpandedChange: (Boolean) -> Unit = {},
+    /** 菜单底部的「播放诊断」开关（iOS 在 ⋯ 菜单里） */
+    onDiagnostics: () -> Unit = {},
+    diagnosticsOpen: Boolean = false,
 ) {
     var expanded by remember { mutableStateOf(false) }
     LaunchedEffect(expanded) { onExpandedChange(expanded) }
@@ -1285,6 +1308,14 @@ private fun QualityMenuButton(
                         .padding(horizontal = 14.dp, vertical = 6.dp),
                 )
             }
+            androidx.compose.material3.HorizontalDivider(color = io.movieclaw.android.core.designsystem.LineColor)
+            DropdownMenuItem(
+                text = { TrackRow("播放诊断", diagnosticsOpen) },
+                onClick = {
+                    expanded = false
+                    onDiagnostics()
+                },
+            )
         }
     }
 }

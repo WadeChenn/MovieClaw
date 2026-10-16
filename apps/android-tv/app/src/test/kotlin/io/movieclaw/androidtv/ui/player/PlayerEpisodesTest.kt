@@ -48,6 +48,7 @@ class PlayerEpisodesTest {
         var next = 0
         var opened = 0
         var left = 0
+        var diagnostics = 0
         val state = PlayerState(
             unit = PlaybackUnit(7, 1, 5),
             phase = Phase.Playing,
@@ -63,7 +64,7 @@ class PlayerEpisodesTest {
             val scope = rememberCoroutineScope()
             Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0xFF34506B), Color(0xFF1B2230))))) {
                 Chrome(state, null, remember { TrickplayImages(OkHttpClient(), scope) { null } }) {
-                    EpisodeActions(state.nextEpisode, onNext = { next++ }, onEpisodes = { opened++ }, focus = focus, onLeave = { left++ })
+                    EpisodeActions(state.nextEpisode, onNext = { next++ }, onEpisodes = { opened++ }, focus = focus, onLeave = { left++ }, onDiagnostics = { diagnostics++ })
                 }
             }
             LaunchedEffect(Unit) { focus.requestFocus() }
@@ -71,12 +72,18 @@ class PlayerEpisodesTest {
         rule.waitForIdle()
         assertEquals("下一集", rule.focusedText())
         rule.savePreview("player-episode-actions")
-        // 左右在两颗之间走、到头不出去，上键不动
+        // 左右在三颗之间走（下一集、选集、播放诊断）、到头不出去，上键不动
         rule.press(KeyEvent.KEYCODE_DPAD_RIGHT)
         assertEquals("选集", rule.focusedText())
         rule.press(KeyEvent.KEYCODE_DPAD_RIGHT)
-        assertEquals("选集", rule.focusedText())
+        assertEquals("播放诊断", rule.focusedText())
+        rule.press(KeyEvent.KEYCODE_DPAD_RIGHT)
+        assertEquals("播放诊断", rule.focusedText())
         rule.press(KeyEvent.KEYCODE_DPAD_UP)
+        assertEquals("播放诊断", rule.focusedText())
+        rule.press(KeyEvent.KEYCODE_DPAD_CENTER)
+        assertEquals(1, diagnostics)
+        rule.press(KeyEvent.KEYCODE_DPAD_LEFT)
         assertEquals("选集", rule.focusedText())
         rule.press(KeyEvent.KEYCODE_DPAD_CENTER)
         assertEquals(1, opened)

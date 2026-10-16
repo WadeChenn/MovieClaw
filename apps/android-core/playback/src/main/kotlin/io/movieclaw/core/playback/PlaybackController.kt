@@ -308,9 +308,92 @@ class PlaybackController(
         startTickLoop()
     }
 
+    // ---- 播放诊断面板（DiagnosticsReport；对照 Apple 端 PlayerDiagnosticsPanel） ----
+
+    private val _diagnostics = MutableStateFlow<List<DiagSection>?>(null)
+
+    /** 面板内容；面板关着时为 null，也不采样、不拉服务端 */
+    val diagnostics: StateFlow<List<DiagSection>?> = _diagnostics.asStateFlow()
+    private var diagnosticsJob: Job? = null
+
+    /** 打开时本机读数每秒采一次，服务端快照（执行、供片）每 2 秒拉一次（同 Apple / Web） */
+    fun setDiagnosticsOpen(open: Boolean) {
+        diagnosticsJob?.cancel()
+        if (!open || closed) {
+            _diagnostics.value = null
+            return
+        }
+        diagnosticsJob = scope.launch {
+            var serverView: io.movieclaw.core.model.generated.PlaybackDiagnosticsView? = null
+            var tick = 0
+            while (isActive) {
+                if (tick % 2 == 0) {
+                    val sid = activeSessionId
+                    val token = tokenIn(session?.streamUrl)
+                    serverView = if (sid != null && token != null) {
+                        runCatching { backend.diagnostics(sid, token) }.getOrNull() ?: serverView
+                    } else {
+                        null
+                    }
+                }
+                _diagnostics.value = DiagnosticsReport.build(session, serverView, engineReading(), diagnosticsLive())
+                tick++
+                delay(1000)
+            }
+        }
+    }
+
+    private fun diagnosticsLive() = PlaybackLive(
+        phase = s.phase,
+        paused = s.paused,
+        activeSessionId = activeSessionId,
+        playsOriginalFile = playsOriginalFile,
+        currentAudio = s.currentAudio,
+        rebufferCount = record?.rebufferCount ?: 0,
+        rebufferMs = record?.rebufferMs ?: 0,
+    )
+
+    /** 本机引擎读数：用的哪个解码器（硬 / 软）、画面动态范围、音频是直通还是解码 */
+    private fun engineReading(): EngineReading {
+        val counters = runCatching { exo.videoDecoderCounters?.also { it.ensureUpdated() } }.getOrNull()
+        val details = buildList {
+            add("通路 " + if (playsOriginalFile) "原文件直连" else "服务端 HLS 流")
+            engineFacts.videoDecoder?.let { add("视频 $it（${if (isSoftwareDecoder(it)) "软解" else "硬解"}）") }
+            when (engineFacts.videoRange) {
+                "dolbyvision" -> "杜比视界"
+                "hdr10" -> "HDR10"
+                "hlg" -> "HLG"
+                "sdr" -> "SDR"
+                else -> null
+            }?.let { range -> add("画面 $range" + (engineFacts.videoFormat?.takeIf { it.width > 0 }?.let { " · ${it.width}×${it.height}" } ?: "")) }
+            engineFacts.audioDecoder?.let { add("音频 $it") }
+            engineFacts.audioOutputEncoding?.let { encoding ->
+                add(
+                    "音频交付 " + if (engineFacts.audioPassthrough) {
+                        "原样直通（${EngineFacts.encodingName(encoding).uppercase(java.util.Locale.ROOT)}）"
+                    } else {
+                        "本机解码为 PCM" + (engineFacts.audioOutputChannels?.let { " $it 声道" } ?: "")
+                    },
+                )
+            }
+            if (engineFacts.audioTunneling) add("隧道播放")
+        }
+        return EngineReading(
+            engine = "ExoPlayer（Media3）",
+            details = details,
+            droppedFrames = counters?.droppedBufferCount?.toLong(),
+            totalFrames = counters?.let { (it.renderedOutputBufferCount + it.droppedBufferCount + it.skippedOutputBufferCount).toLong() },
+            bitrateBps = engineFacts.videoFormat?.bitrate?.takeIf { it > 0 }?.toLong(),
+            downlinkBps = bandwidth.bitrateEstimate.takeIf { it > 0 },
+            bufferedSeconds = ((exo.bufferedPosition - exo.currentPosition) / 1000.0).coerceAtLeast(0.0),
+            positionSeconds = currentFileMs() / 1000.0,
+        )
+    }
+
     /** 退出播放器：补一次 stop 上报与质量记录、释放服务端会话、销毁播放器 */
     fun close() {
         if (closed) return
+        diagnosticsJob?.cancel()
         endRecord()
         leaveUnit()
         closed = true
@@ -2004,6 +2087,12 @@ class PlaybackController(
             if (path == null) return null
             val query = path.substringAfter('?', "")
             return query.split('&').firstOrNull { it.startsWith("token=") }?.removePrefix("token=")?.takeIf { it.isNotEmpty() }
+        }
+
+        /** 系统自带的软件解码器（Codec2 / OMX 的 google 实现）与内置 FFmpeg 扩展；其余视为芯片硬解 */
+        fun isSoftwareDecoder(name: String): Boolean {
+            val lower = name.lowercase(java.util.Locale.ROOT)
+            return lower.startsWith("c2.android.") || lower.startsWith("omx.google.") || "ffmpeg" in lower || lower.contains(".sw.")
         }
     }
 }
